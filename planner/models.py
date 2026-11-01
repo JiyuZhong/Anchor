@@ -147,7 +147,11 @@ def validate_project(project: Project) -> None:
     task_ids = set()
 
     def visit(nodes: list[TaskNode], depth: int) -> None:
+        if not isinstance(nodes, list):
+            raise ValueError("Tasks must be a list of task nodes.")
         for node in nodes:
+            if not isinstance(node, TaskNode):
+                raise ValueError("Each task must be a task node.")
             if depth > 3:
                 raise ValueError("Maximum depth is project -> stage -> task.")
             if not node.id or node.id in task_ids:

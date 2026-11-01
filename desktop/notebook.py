@@ -4,7 +4,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QListWidget, QListWidgetItem,
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QListWidget, QListWidgetItem,
     QMenu, QStackedWidget, QTabBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -16,7 +16,7 @@ from planner.statistics import local_timezone
 class TaskPages(QWidget):
     def __init__(self, window, project):
         super().__init__()
-        from .window import button, label, row
+        from .window import button, duration, label, row
         self.window = window
         self.page = getattr(window, "_task_page", 0)
         self.capacity = 5
@@ -27,9 +27,13 @@ class TaskPages(QWidget):
         layout.setSpacing(8)
         layout.addLayout(row(button("+ Task", window.add_task), button("+ Subtask", window.add_subtask),
                              button("Rename", window.rename_task, "ghost"), button("Delete", window.delete_task, "ghost")))
+        layout.addWidget(label("Select a name to focus. Tick a box to mark a step complete.", "muted", True))
         self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
-        self.tree.setColumnCount(1)
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Task", "Recorded"])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setStretchLastSection(False)
         self.tree.setMinimumHeight(64)
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -38,10 +42,26 @@ class TaskPages(QWidget):
         self.tree.installEventFilter(self)
         window.task_tree = self.tree
 
+        direct = {}
+        for log in project.logs:
+            direct[log.task_id] = direct.get(log.task_id, 0) + log.minutes
+        totals = {}
+
+        def total(node):
+            totals[node.id] = direct.get(node.id, 0) + sum(total(child) for child in node.children)
+            return totals[node.id]
+
+        for node in project.tasks:
+            total(node)
+
         def add_nodes(nodes, parent=None):
             for node in nodes:
-                item = QTreeWidgetItem([node.title])
+                recorded = totals[node.id]
+                item = QTreeWidgetItem([node.title, duration(recorded) + (" total" if node.children else "")])
+                item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 item.setToolTip(0, node.title)
+                own = direct.get(node.id, 0)
+                item.setToolTip(1, f"Direct: {duration(own)}\nSubtasks: {duration(recorded - own)}\nTotal: {duration(recorded)}\nEach record counts once towards the project.")
                 item.setData(0, Qt.ItemDataRole.UserRole, node.id)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, bool(node.children))
                 if node.children:
@@ -118,6 +138,20 @@ class TaskPages(QWidget):
         self.tree.clearSelection()
         self.tree.setCurrentItem(None)
 
+    def select_task(self, task_id):
+        """Reveal a newly added task while keeping its parent in view."""
+        item = next((item for item in self.items() if item.data(0, Qt.ItemDataRole.UserRole) == task_id), None)
+        if item is None:
+            return
+        parent = item.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        self.page = self.items(expanded_only=True).index(item) // self.capacity
+        self.repage()
+        self.tree.setCurrentItem(item)
+        self.tree.setFocus()
+
     def queue_fit(self):
         if not self._fit_pending:
             self._fit_pending = True
@@ -131,7 +165,11 @@ class TaskPages(QWidget):
         row_height = max([self.tree.fontMetrics().height() + 18] + heights)
         capacity = max(1, (self.tree.viewport().height() - 6) // row_height - 1)
         if capacity != self.capacity:
+            current = self.tree.currentItem()
             self.capacity = capacity
+            rows = self.items(expanded_only=True)
+            if current in rows:
+                self.page = rows.index(current) // capacity
             self.repage()
 
     def eventFilter(self, watched, event):

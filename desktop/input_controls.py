@@ -3,12 +3,41 @@
 from decimal import Decimal, InvalidOperation
 import re
 
-from PySide6.QtCore import QDate, QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QDate, QEvent, QObject, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPalette, QTextCharFormat
 from PySide6.QtWidgets import (
     QApplication, QCalendarWidget, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
+
+
+class _TextInputSupport(QObject):
+    """Keep native editing cues clear over the illustrated room."""
+
+    def eventFilter(self, widget, event):
+        if event.type() not in (
+                QEvent.Type.Polish, QEvent.Type.Show, QEvent.Type.FocusIn,
+                QEvent.Type.StyleChange):
+            return False
+        if isinstance(widget, QLineEdit):
+            widget.setCursor(Qt.CursorShape.IBeamCursor)
+        elif isinstance(widget, (QTextEdit, QPlainTextEdit)):
+            widget.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+            widget.setCursorWidth(max(2, widget.cursorWidth()))
+        else:
+            return False
+        if event.type() == QEvent.Type.FocusIn:
+            widget.update()
+        # Leave key events, selection, and input-method composition to Qt.
+        return False
+
+
+def install_text_input_support(application):
+    """Install once; later dialogs and inline editors receive the same cues."""
+    if not hasattr(application, "_anchor_text_input_support"):
+        support = _TextInputSupport(application)
+        application.installEventFilter(support)
+        application._anchor_text_input_support = support
 
 
 def parse_duration(text):

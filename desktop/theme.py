@@ -43,6 +43,9 @@ QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDateEdit, QComboBox {
  selection-background-color: #ccd8c7; selection-color: #293c2e; min-height: 19px;
 }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #8b9c81; background: #fffef9; }
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+ color: #263b2e; border: 2px solid #71866b; padding: 7px;
+}
 QComboBox QAbstractItemView { background: #faf9f3; color: #344136; border: 1px solid #d7dbcd; selection-background-color: #dce5d5; selection-color: #2d4434; }
 QComboBox::drop-down { border: 0; width: 24px; }
 QSpinBox::up-button, QDateEdit::up-button { width: 18px; }
@@ -111,6 +114,7 @@ QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDateEdit, QComboBox {
  selection-background-color: #4e6448; selection-color: #ecf2e3;
 }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { background: #26332f; border-color: #9aaf84; }
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus { color: #f0f4e8; border-color: #b3c99d; }
 QComboBox QAbstractItemView { background: #29343a; color: #dce4d5; border-color: #4b5a4a; selection-background-color: #4b6044; selection-color: #eff4e5; }
 QTreeWidget, QListWidget { background: #263236; border-color: #455447; alternate-background-color: #2d3a39; }
 QTreeWidget::item, QListWidget::item { border-bottom-color: #3c4b40; }

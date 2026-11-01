@@ -543,6 +543,8 @@ class AnchorWindow(QMainWindow):
                 p = self.service.create_project(**dialog.payload())
                 self.selected_project_id = p.id
             self.current_page = "plan"
+            self._plan_tabs_index = 0
+            self._task_page = 0
             self.operate(create, "A new page, ready for you.")
 
     def edit_project(self):
@@ -584,12 +586,19 @@ class AnchorWindow(QMainWindow):
     def add_task(self, parent_id=None):
         title, accepted = QInputDialog.getText(self, "A small next step", "Task name")
         if accepted:
-            self.operate(lambda: self.service.add_task(self.selected_project_id, title.strip(), parent_id))
+            created = []
+            def create():
+                created.append(self.service.add_task(self.selected_project_id, title.strip(), parent_id))
+            if self.operate(create):
+                self.task_pages.select_task(created[0].id)
 
     def add_subtask(self):
         tid = self.selected_task_id()
         if not tid:
             self.notify("Select a task to break it into smaller steps.")
+            return
+        if self.task_tree.currentItem().parent() is not None:
+            self.notify("Select a top-level task to add a subtask. Subtasks cannot contain another level.")
             return
         self.add_task(tid)
 
@@ -615,10 +624,13 @@ class AnchorWindow(QMainWindow):
             self.operate(lambda: self.service.delete_task(self.selected_project_id, tid), "Task removed; your time is preserved.")
 
     def toggle_task(self, item, column):
-        if item.data(0, Qt.ItemDataRole.UserRole + 1):
+        if column != 0 or item.data(0, Qt.ItemDataRole.UserRole + 1):
             return
         tid = item.data(0, Qt.ItemDataRole.UserRole)
         completed = item.checkState(0) == Qt.CheckState.Checked
+        node = self.selected_project().find_task(tid)
+        if node is None or node.completed == completed:
+            return
         failure = None
         try:
             self.service.set_task_completed(self.selected_project_id, tid, completed)
@@ -704,6 +716,7 @@ class AnchorWindow(QMainWindow):
         self.focus_project_combo.currentIndexChanged.connect(self.populate_focus_tasks)
         content.addWidget(self.focus_project_combo)
         content.addWidget(self.focus_task_combo)
+        content.addWidget(label("Choose a task or one of its subtasks. Both contribute to the task total, counted once per session.", "muted", True))
         self.clock_label = label("00:00")
         self.clock_label.setStyleSheet("font-family: 'Avenir Next'; font-size: 60px; font-weight: 300; color: #495B50;")
         self.clock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -733,10 +746,11 @@ class AnchorWindow(QMainWindow):
         self.focus_task_combo.addItem("Work on the whole project", None)
         if not pid:
             return
-        def visit(nodes, depth=0):
+        def visit(nodes, path=()):
             for task in nodes:
-                self.focus_task_combo.addItem("    " * depth + task.title, task.id)
-                visit(task.children, depth + 1)
+                names = (*path, task.title)
+                self.focus_task_combo.addItem(" / ".join(names), task.id)
+                visit(task.children, names)
         visit(self.service.get_project(pid).tasks)
         index = self.focus_task_combo.findData(self.session_task_id)
         if index >= 0:

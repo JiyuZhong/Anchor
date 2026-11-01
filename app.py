@@ -73,9 +73,11 @@ def launch_desktop(data_path, preview=False, screenshot=None, page="room"):
         print("Anchor needs its desktop dependency. Run:\n  python -m pip install -r requirements.txt\nThen run: python app.py", file=sys.stderr)
         return 1
     from desktop.window import AnchorWindow
+    from desktop.input_controls import install_text_input_support
     from desktop.sample import seed_sample
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("Anchor")
+    install_text_input_support(application)
     data_path = Path(data_path).resolve()
     data_path.parent.mkdir(parents=True, exist_ok=True)
     # One lock per profile prevents two windows from overwriting each other.

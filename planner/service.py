@@ -61,7 +61,10 @@ class PlannerService:
                        daily_minutes: int, daily_limit_minutes: int | None = None,
                        start_date: date | None = None, color: str = "#7C83C4",
                        motivation: str = "", related_project_id: str | None = None,
-                       catch_up_enabled: bool = True) -> Project:
+                       catch_up_enabled: bool = True,
+                       tasks: list[TaskNode] | None = None) -> Project:
+        if tasks is not None and not isinstance(tasks, list):
+            raise ValueError("Initial tasks must be a list of task nodes.")
         if related_project_id is not None:
             self.get_project(related_project_id)
         project = Project(
@@ -70,8 +73,9 @@ class PlannerService:
             daily_limit_minutes=daily_minutes if daily_limit_minutes is None else daily_limit_minutes,
             color=color, motivation=motivation, related_project_id=related_project_id,
             catch_up_enabled=catch_up_enabled,
+            tasks=deepcopy(tasks) if tasks is not None else [],
         )
-        self._commit(project)
+        self._commit(project)  # Save the project and its initial tasks together.
         return self.get_project(project.id)
 
     def update_project(self, project_id: str, **changes) -> Project:
@@ -99,8 +103,8 @@ class PlannerService:
             project.tasks.append(task)
         else:
             parent = project.find_task(parent_id)
-            if parent.completed:
-                raise ValueError("Reopen a completed task before breaking it down further.")
+            # New unfinished work reopens a completed leaf without losing its logs.
+            parent.completed = False
             parent.children.append(task)
         self._commit(project)  # Includes the maximum-depth and cycle checks.
         return deepcopy(task)

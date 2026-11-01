@@ -32,8 +32,11 @@ Notebook to choose a project. The five bottom buttons show different views of
 the same room: Room, Notebook, Focus, Collection and Music.
 
 Notebook has three fixed section tabs:
-- Tasks: add tasks and subtasks, rename or delete them, and mark leaf tasks done.
-  Select a task to start a focus session for it.
+- Tasks: outline tasks and subtasks when creating a project, or add them later.
+  Select a name to focus; tick its box to mark a step done. You can work on a
+  task directly or choose a subtask. The task's recorded total includes both,
+  and each record counts once towards the project. Adding a new subtask reopens
+  a completed task without removing its recorded time.
 - Daily plan: see today's suggested time and what still fits before the deadline.
 - Records: view hourly focus bars or open Entries to add, edit, backfill or delete
   a work record. You can undo the latest record change, including after a restart.
@@ -139,5 +142,5 @@ File I/O is used to save and restore records; recursion is used to search and
 total nested tasks. See docs/ARCHITECTURE.md for the main data flow.
 
 DOWNLOAD AND INSTALLATION
-https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.0
+https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.1
 INSTALL.txt explains the Mac app, portable source and offline dependency kit.

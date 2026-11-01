@@ -52,6 +52,11 @@ subtree total. These are the project's uses of **Recursion**.
 
 Recorded minutes, task completion and project outcome are separate values.
 Reaching the original time estimate does not mark an outcome complete.
+The project form accepts an optional initial task tree; the service validates
+and saves it with the project in one write. Adding a child clears the parent's
+old leaf-completion flag, while preserving all records. Both parent and child
+IDs are valid focus targets. The task list shows inclusive totals and separates
+row selection from completion checkboxes.
 
 ## Daily suggestions
 
@@ -135,6 +140,6 @@ Source mode saves beside app.py in `data/`. A frozen Mac app uses the user's
 temporary directory and cannot overwrite a personal profile. Unsaved running
 sessions are not recovered after a crash.
 
-The v1.1.0 release provides the consolidated source and installation packages.
+The v1.1.1 release provides the consolidated source and installation packages.
 The runtime app targets Apple Silicon; the offline source kit supplies Qt
 wheels for the documented platforms and needs Python 3.10-3.13.

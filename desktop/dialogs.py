@@ -8,8 +8,11 @@ from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
+    QLineEdit, QPushButton, QSizePolicy, QTabWidget, QTextEdit, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
+
+from planner.models import TaskNode
 
 from .input_controls import DateInput, DurationInput
 
@@ -96,6 +99,90 @@ class _InputDialog(QDialog):
         self.error_label.setVisible(True)
 
 
+class TaskOutlineEditor(QWidget):
+    """Prepare a two-level task outline before the project is saved."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 14, 0, 0)
+        layout.setSpacing(10)
+        hint = QLabel("Add a task, then select it to add smaller steps. You can focus on either level.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setAccessibleName("Initial tasks and subtasks")
+        self.tree.setMinimumHeight(180)
+        self.tree.setToolTip("Double-click a task name to rename it.")
+        layout.addWidget(self.tree, 1)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Name a task or a smaller step")
+        self.name_edit.setAccessibleName("New task name")
+        self.name_edit.setMaxLength(200)
+        layout.addWidget(self.name_edit)
+        actions = QHBoxLayout()
+        self.add_task_button = QPushButton("+ Task")
+        self.add_subtask_button = QPushButton("+ Subtask")
+        self.remove_button = QPushButton("Remove")
+        for button in (self.add_task_button, self.add_subtask_button, self.remove_button):
+            button.setAutoDefault(False)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            actions.addWidget(button)
+        layout.addLayout(actions)
+        self.add_task_button.clicked.connect(lambda: self.add_task())
+        self.add_subtask_button.clicked.connect(lambda: self.add_task(as_subtask=True))
+        self.remove_button.clicked.connect(self.remove_selected)
+        self.name_edit.returnPressed.connect(self.add_task)
+        self.name_edit.textChanged.connect(self.update_actions)
+        self.tree.itemSelectionChanged.connect(self.update_actions)
+        self.update_actions()
+
+    def update_actions(self, *args):
+        selected = self.tree.currentItem()
+        has_name = bool(self.name_edit.text().strip())
+        self.add_task_button.setEnabled(has_name)
+        self.add_subtask_button.setEnabled(has_name and selected is not None and selected.parent() is None)
+        self.add_subtask_button.setToolTip("Select a top-level task to add a subtask.")
+        self.remove_button.setEnabled(selected is not None)
+
+    def add_task(self, as_subtask=False):
+        title = self.name_edit.text().strip()
+        parent = self.tree.currentItem() if as_subtask else None
+        if not title or (as_subtask and (parent is None or parent.parent() is not None)):
+            return
+        item = QTreeWidgetItem([title])
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        if parent is None:
+            self.tree.addTopLevelItem(item)
+        else:
+            parent.addChild(item)
+            parent.setExpanded(True)
+        self.tree.setCurrentItem(item)
+        self.name_edit.clear()
+        self.name_edit.setFocus()
+
+    def remove_selected(self):
+        item = self.tree.currentItem()
+        if item is None:
+            return
+        parent = item.parent()
+        if parent is None:
+            self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
+        else:
+            parent.takeChild(parent.indexOfChild(item))
+        self.update_actions()
+
+    def tasks(self):
+        def node(item):
+            title = item.text(0).strip()
+            if not title:
+                raise ValueError("Give every task a name, or remove the empty task.")
+            return TaskNode(title, children=[node(item.child(i)) for i in range(item.childCount())])
+        return [node(self.tree.topLevelItem(i)) for i in range(self.tree.topLevelItemCount())]
+
+
 class ProjectDialog(_InputDialog):
     """Edit project settings while keeping the original total estimate fixed."""
 
@@ -108,6 +195,17 @@ class ProjectDialog(_InputDialog):
         self.project = project
         self.setMinimumWidth(560)
         self.resize(620, 590)
+        self.task_editor = None
+        if project is None:
+            self.layout_box.removeItem(self.form)
+            self.form.setParent(None)
+            settings = QWidget()
+            settings.setLayout(self.form)
+            self.tabs = QTabWidget()
+            self.tabs.addTab(settings, "Project")
+            self.task_editor = TaskOutlineEditor()
+            self.tabs.addTab(self.task_editor, "Tasks (optional)")
+            self.layout_box.addWidget(self.tabs, 1)
         self.title_edit = QLineEdit(project.title if project else "")
         self.title_edit.setPlaceholderText("What would you like to work towards?")
         self.title_edit.setMaxLength(200)
@@ -195,10 +293,19 @@ class ProjectDialog(_InputDialog):
             self.fixed_hint = fixed_hint
             self.layout_box.addWidget(fixed_hint)
         self._add_buttons("Save changes" if project else "Create project")
+        if self.task_editor is not None:
+            self.tabs.currentChanged.connect(self._set_default_action)
+            self._set_default_action(0)
         self.daily_minutes.valueChanged.connect(self._keep_cap_above_daily_goal)
         self.no_deadline_check.toggled.connect(self._update_deadline_mode)
         self._update_deadline_mode()
         self.title_edit.setFocus()
+
+    def _set_default_action(self, index):
+        # Enter adds a draft task without submitting the whole project.
+        self.save_button.setAutoDefault(index == 0)
+        self.save_button.setDefault(index == 0)
+        self.cancel_button.setAutoDefault(False)
 
     def _keep_cap_above_daily_goal(self, amount):
         try:
@@ -229,9 +336,23 @@ class ProjectDialog(_InputDialog):
         }
         if self.project is None:
             values["planned_minutes"] = 300 if self.no_deadline_check.isChecked() else self.planned_minutes.value()
+            values["tasks"] = self.task_editor.tasks()
         return values
 
     def accept(self):
+        if self.task_editor is not None:
+            if self.task_editor.name_edit.text().strip():
+                self.tabs.setCurrentIndex(1)
+                self._show_error("Add the task name to your outline, or clear it before creating the project.")
+                self.task_editor.name_edit.setFocus()
+                return
+            try:
+                self.task_editor.tasks()
+            except ValueError as exc:
+                self.tabs.setCurrentIndex(1)
+                self._show_error(str(exc))
+                self.task_editor.tree.setFocus()
+                return
         try:
             fields = (self.daily_minutes, self.daily_limit_minutes)
             if not self.no_deadline_check.isChecked():
@@ -241,14 +362,20 @@ class ProjectDialog(_InputDialog):
             values = self.payload()
         except ValueError as exc:
             self._show_error(str(exc))
+            if self.task_editor is not None:
+                self.tabs.setCurrentIndex(0)
             field.setFocus()
             return
         if not values["title"]:
             self._show_error("Give your project a name before saving.")
+            if self.task_editor is not None:
+                self.tabs.setCurrentIndex(0)
             self.title_edit.setFocus()
             return
         if values["daily_limit_minutes"] < values["daily_minutes"]:
             self._show_error("The daily suggestion cap must be at least your daily rhythm.")
+            if self.task_editor is not None:
+                self.tabs.setCurrentIndex(0)
             self.daily_limit_minutes.setFocus()
             return
         if values["deadline"] is not None and values["deadline"] < (self.project.start_date if self.project else date.today()):
@@ -277,10 +404,11 @@ class WorkLogDialog(_InputDialog):
         self.task_combo = QComboBox()
         self.task_combo.addItem("The whole project", None)
 
-        def add_tasks(tasks, depth=0):
+        def add_tasks(tasks, path=()):
             for task in tasks:
-                self.task_combo.addItem(("    " * depth) + task.title, task.id)
-                add_tasks(task.children, depth + 1)
+                names = (*path, task.title)
+                self.task_combo.addItem(" / ".join(names), task.id)
+                add_tasks(task.children, names)
 
         add_tasks(project.tasks)
         selected = log.task_id if log else initial_task_id
@@ -301,6 +429,10 @@ class WorkLogDialog(_InputDialog):
         self.form.addRow("Actual work date", self.date_edit)
         self.form.addRow("Time spent", self.minutes_edit)
         self.form.addRow("Task", self.task_combo)
+        task_hint = QLabel("Task time includes its subtasks. Each record counts once towards the project.")
+        task_hint.setObjectName("muted")
+        task_hint.setWordWrap(True)
+        self.form.addRow("", task_hint)
         self.form.addRow("Note", self.note_edit)
         self._add_buttons("Save changes" if log else "Save time record")
         if project.start_date > date.today():
