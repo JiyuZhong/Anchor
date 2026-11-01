@@ -87,13 +87,24 @@ class FocusHourChart(QWidget):
         offsets = {stamp.utcoffset() for pair in stamps for stamp in pair}
         ranges = []
         for start, end in stamps:
-            precise = bool(start.second or end.second)
+            precise = bool(start.second or end.second or start.microsecond or end.microsecond)
             pattern = "%H:%M:%S" if precise else "%H:%M"
+            start_text, end_text = start.strftime(pattern), end.strftime(pattern)
+            if start.replace(microsecond=0) == end.replace(microsecond=0):
+                digits = 3 if start.microsecond // 1000 != end.microsecond // 1000 else 6
+                start_text += "." + f"{start.microsecond:06d}"[:digits]
+                end_text += "." + f"{end.microsecond:06d}"[:digits]
             if len(offsets) > 1:
-                pattern += " %z"
-            ranges.append(f"{start.strftime(pattern)}–{end.strftime(pattern)}")
+                start_text += start.strftime(" %z")
+                end_text += end.strftime(" %z")
+            ranges.append(f"{start_text}–{end_text}")
         sources = {item.get("timing_source", "observed") for item in intervals}
-        source = "User-confirmed" if sources == {"confirmed"} else "Earlier timer" if sources == {"observed"} else "Confirmed + timer"
+        if sources == {"confirmed"}:
+            source = "User-confirmed"
+        elif sources == {"observed"}:
+            source = "Earlier timer"
+        else:
+            source = "Confirmed + timer"
         detail = source + " · " + "  ·  ".join(ranges)
         if len(intervals) > 2:
             detail += f"  +{len(intervals)-2} more"

@@ -145,10 +145,12 @@ CODE
 planner/ contains the models, calculations, timer and JSON storage.
 desktop/ contains the native interface and scene drawing.
 tools/ contains the source and runtime packaging scripts.
+Start with planner/models.py, service.py and planning.py. The architecture guide
+follows one action from the form to validation, saving and the refreshed view.
 
 File I/O is used to save and restore records; recursion is used to search and
 total nested tasks. See docs/ARCHITECTURE.md for the main data flow.
 
 DOWNLOAD AND INSTALLATION
-https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2
+https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.3
 INSTALL.txt explains the Mac app, portable source and offline dependency kit.

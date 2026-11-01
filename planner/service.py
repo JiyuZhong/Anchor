@@ -10,10 +10,13 @@ from .statistics import local_timezone, recorded_minutes_on
 from .storage import JsonRepository
 
 
+# Omitting periods during an edit keeps the record's current periods.
 _UNCHANGED = object()
 
 
 class PlannerService:
+    """Apply one user action, validate it, then save it before changing memory."""
+
     def __init__(self, repository: JsonRepository, today=date.today):
         self.repository = repository
         self.today = today
@@ -45,7 +48,7 @@ class PlannerService:
     def _editable(self, project_id: str) -> Project:
         project = self.get_project(project_id)
         if project.archived_at is not None:
-            raise ValueError("Archived projects are read-only in this first version.")
+            raise ValueError("Reopen an archived project before editing it.")
         return project
 
     def _commit(self, project: Project, change=None, keep_undo=True) -> None:
@@ -157,11 +160,18 @@ class PlannerService:
         project = self._editable(project_id)
         task = project.find_task(task_id)
         if task.children:
-            raise ValueError("A stage's status is calculated from its child tasks.")
+            raise ValueError("A parent task is complete when all its subtasks are complete.")
         task.completed = completed
         self._commit(project)
 
+    def _check_work_date(self, worked_on: date) -> None:
+        if type(worked_on) is not date:
+            raise ValueError("Choose a calendar date for the work record.")
+        if worked_on > self.today():
+            raise ValueError("Actual work cannot be recorded in the future.")
+
     def _work_minutes(self, minutes, intervals):
+        """Derive minutes from periods, or retain a duration-only legacy record."""
         if intervals is None:
             if minutes is None:
                 raise ValueError("Choose work periods or provide recorded minutes.")
@@ -183,8 +193,7 @@ class PlannerService:
                  focus_details: dict | None = None,
                  work_intervals: list[dict] | None = None) -> WorkLog:
         project = self._editable(project_id)
-        if worked_on > self.today():
-            raise ValueError("Actual work cannot be recorded in the future.")
+        self._check_work_date(worked_on)
         minutes = self._work_minutes(minutes, work_intervals)
         log = WorkLog(worked_on, minutes, datetime.now(timezone.utc).isoformat(), task_id, note,
                       source=source, focus_details=deepcopy(focus_details),
@@ -199,8 +208,7 @@ class PlannerService:
                   minutes: int | None = None, note: str = "", *,
                   work_intervals=_UNCHANGED) -> None:
         project = self._editable(project_id)
-        if worked_on > self.today():
-            raise ValueError("Actual work cannot be recorded in the future.")
+        self._check_work_date(worked_on)
         index = self._log_index(project, log_id)
         before = project.logs[index].to_dict()
         log = project.logs[index]

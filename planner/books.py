@@ -3,18 +3,17 @@
 from copy import deepcopy
 from pathlib import PurePosixPath
 import re
-from types import MappingProxyType
 
 # The current study uses "city"; keep other keys for older saved layouts.
 LAYOUT_IDS = ("city", "attic", "garden")
 
 
-TEMPLATES = MappingProxyType({
+TEMPLATES = {
     "linen": {"name": "Linen", "cover_color": "#8FA79D", "spine_color": "#6F8D85"},
     "classic": {"name": "Classic", "cover_color": "#74566A", "spine_color": "#604254"},
     "botanical": {"name": "Botanical", "cover_color": "#627C61", "spine_color": "#48644B"},
     "celestial": {"name": "Celestial", "cover_color": "#526482", "spine_color": "#394C6C"},
-})
+}
 
 
 def _value(project, name, default=None):

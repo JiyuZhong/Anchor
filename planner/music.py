@@ -27,8 +27,11 @@ def app_path(app_id, platform=None):
         raise ValueError("Choose Spotify or Apple Music.")
     if (platform or sys.platform) != "darwin":
         return None
-    return next((path for value in MUSIC_APPS[app_id].paths
-                 if (path := Path(value).expanduser()).is_dir()), None)
+    for location in MUSIC_APPS[app_id].paths:
+        path = Path(location).expanduser()
+        if path.is_dir():
+            return path
+    return None
 
 
 def player_script(app_id, action="status", volume=None):

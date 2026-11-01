@@ -3,6 +3,18 @@
 The application has two parts: `planner/` handles saved data and calculations;
 `desktop/` presents them with PySide6. The core does not depend on Qt.
 
+Read the core in this order:
+
+1. `models.py`: what a project, task and work record contain.
+2. `service.py`: how an action validates a copy, saves it, then updates memory.
+3. `planning.py`: how recorded minutes become daily targets and catch-up.
+4. `activity.py` and `statistics.py`: how time periods become durations and charts.
+5. `storage.py`: how JSON is loaded and safely replaced.
+
+The main path is: form -> service -> validation -> JSON save -> refreshed view.
+Book design, music commands and room notes have small separate modules. The old
+furniture/reward code is omitted because the current app does not use it.
+
 ## Where to start
 
 | File | Purpose |
@@ -147,6 +159,6 @@ Source mode saves beside app.py in `data/`. A frozen Mac app uses the user's
 temporary directory and cannot overwrite a personal profile. Unsaved running
 sessions are not recovered after a crash.
 
-The v1.1.2 release provides the consolidated source and installation packages.
+The v1.1.3 release provides the consolidated source and installation packages.
 The runtime app targets Apple Silicon; the offline source kit supplies Qt
 wheels for the documented platforms and needs Python 3.10-3.13.

@@ -43,5 +43,5 @@ class FocusTimer:
         self._started_at = None
         self._accumulated = 0.0
         self.state = "idle"
-        # The window converts this duration to minutes for user confirmation.
+        # The window resets only after saving or explicitly discarding a session.
         return result

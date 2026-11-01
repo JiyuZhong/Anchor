@@ -1,7 +1,7 @@
 ANCHOR 1.1.0 - INSTALLATION
 
 Downloads:
-https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2
+https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.3
 
 1. APPLE SILICON MAC APP
 Download Anchor-macOS-AppleSilicon.zip and extract the complete archive.

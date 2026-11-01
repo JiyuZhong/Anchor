@@ -1,11 +1,11 @@
 """Daily focus and music totals from recorded activity intervals."""
 
 from datetime import date, datetime, time, timedelta, timezone
-from bisect import bisect_right
-import math
 import os
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .activity import interval_microseconds, parse_timestamp
 
 
 UTC = timezone.utc
@@ -35,6 +35,7 @@ def local_timezone():
 
 
 def _get(value, name, default=None):
+    """Read either a model field or its saved dictionary entry."""
     return value.get(name, default) if isinstance(value, dict) else getattr(value, name, default)
 
 
@@ -53,27 +54,33 @@ def _logs(values):
 
 
 def _parse(value):
-    stamp = datetime.fromisoformat(value) if isinstance(value, str) else value
+    stamp = parse_timestamp(value) if isinstance(value, str) else value
     if not isinstance(stamp, datetime) or stamp.tzinfo is None or stamp.utcoffset() is None:
         raise ValueError("Activity timestamps must include a time zone.")
     return stamp.astimezone(UTC)
 
 
-def _clip(interval, start, end):
-    """Clip an interval to a day and return its duration scale."""
-    left, right = _parse(interval["started_at"]), _parse(interval["ended_at"])
-    wall_seconds = (right-left).total_seconds()
-    seconds = float(interval["seconds"])
-    if wall_seconds <= 0 or seconds <= 0:
+def _day_start(on, tz):
+    return datetime.combine(on, time.min, tzinfo=tz).astimezone(UTC)
+
+
+def _clip(interval, start, end, *, confirmed=False):
+    """Keep the part inside a day; only legacy observations need a scale."""
+    left = _parse(interval["started_at"])
+    right = _parse(interval["ended_at"])
+    elapsed = (right - left).total_seconds()
+    if elapsed <= 0:
         return None
-    clipped_left, clipped_right = max(left, start), min(right, end)
-    if clipped_right <= clipped_left:
+    weight = 1.0 if confirmed else float(interval["seconds"]) / elapsed
+    left, right = max(left, start), min(right, end)
+    if right <= left or weight <= 0:
         return None
-    return clipped_left, clipped_right, seconds / wall_seconds
+    return left, right, weight
 
 
 def _hourly(interval, start, end, tz, bins, periods, metadata=None):
-    clipped = _clip(interval, start, end)
+    confirmed = metadata is not None and metadata["timing_source"] == "confirmed"
+    clipped = _clip(interval, start, end, confirmed=confirmed)
     if clipped is None:
         return 0.0, None
     left, right, weight = clipped
@@ -102,32 +109,29 @@ def _hourly(interval, start, end, tz, bins, periods, metadata=None):
 
 
 def recorded_minutes_by_day(log, tz=None):
-    """Split confirmed periods into local days while preserving recorded minutes."""
+    """Split confirmed periods into local days without changing their total."""
     intervals = _get(log, "work_intervals")
     on = _get(log, "worked_on")
     on = date.fromisoformat(on) if isinstance(on, str) else on
     minutes = _get(log, "minutes", 0)
     if intervals is None:
-        return {on: minutes}
+        return {on: minutes}  # Older records keep their original work date.
     tz = ZoneInfo(tz) if isinstance(tz, str) else (tz or local_timezone())
-    seconds_by_day = {}
+    by_day = {}
     for interval in intervals:
-        start, end = _parse(interval["started_at"]), _parse(interval["ended_at"])
-        if end <= start:
-            continue
-        weight = float(interval["seconds"]) / (end-start).total_seconds()
-        cursor = start
+        cursor = _parse(interval["started_at"])
+        end = _parse(interval["ended_at"])
         while cursor < end:
             on = cursor.astimezone(tz).date()
-            midnight = datetime.combine(on + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
-            following = min(end, midnight)
-            seconds_by_day[on] = seconds_by_day.get(on, 0.0) + (following-cursor).total_seconds() * weight
+            following = min(end, _day_start(on + timedelta(days=1), tz))
+            by_day[on] = by_day.get(on, 0) + interval_microseconds(cursor, following)
             cursor = following
-    result = {on: math.floor(seconds / 60) for on, seconds in seconds_by_day.items()}
-    remainder = minutes - sum(result.values())
-    # Largest remainders keep one rounded minute from appearing on both dates.
-    ordered = sorted(result, key=lambda on: (-(seconds_by_day[on] / 60 - result[on]), on))
-    for on in ordered[:remainder]:
+    minute = 60_000_000
+    result = {on: elapsed // minute for on, elapsed in by_day.items()}
+    remaining = minutes - sum(result.values())
+    # Give rounding minutes to the largest fractions; ties go to earlier days.
+    ordered = sorted(by_day, key=lambda on: (-(by_day[on] % minute), on))
+    for on in ordered[:remaining]:
         result[on] += 1
     return result
 
@@ -136,21 +140,49 @@ def recorded_minutes_on(log, on, tz=None):
     return recorded_minutes_by_day(log, tz).get(on, 0)
 
 
-def _music_parts(interval, start, end, windows, window_ends):
-    clipped = _clip(interval, start, end)
-    if clipped is None:
-        return []
-    left, right, weight = clipped
-    if windows is None:
-        return [(left, right, weight)]
+def _music_intersections(songs, work, start, end):
+    """Walk two ordered lists without moving or extending any song."""
     result = []
-    index = bisect_right(window_ends, left)
-    while index < len(windows) and windows[index][0] < right:
-        begin, finish = max(left, windows[index][0]), min(right, windows[index][1])
-        if finish > begin:
-            result.append((begin, finish, weight))
-        index += 1
+    windows = None if work is None else [
+        (_parse(span["started_at"]), _parse(span["ended_at"])) for span in work
+    ]
+    first_window = 0
+    for song in songs:
+        clipped = _clip(song, start, end)
+        if clipped is None:
+            continue
+        left, right, weight = clipped
+        if windows is None:
+            result.append((song, left, right, weight))
+            continue
+        while first_window < len(windows) and windows[first_window][1] <= left:
+            first_window += 1
+        index = first_window
+        while index < len(windows) and windows[index][0] < right:
+            beginning = max(left, windows[index][0])
+            ending = min(right, windows[index][1])
+            if ending > beginning:
+                result.append((song, beginning, ending, weight))
+            index += 1
     return result
+
+
+def _add_music_tracks(tracks, details, work, start, end, tz):
+    """Add real listening intersections to the day's track totals."""
+    total = 0.0
+    for song, left, right, weight in _music_intersections(details.get("music", []), work, start, end):
+        title = song.get("title", "").strip()
+        if not title:
+            continue
+        key = (title, song.get("artist", ""), song.get("player", ""))
+        track = tracks.setdefault(key, {"title": key[0], "artist": key[1], "player": key[2],
+                                       "seconds": 0.0, "periods": []})
+        seconds = (right - left).total_seconds() * weight
+        track["seconds"] += seconds
+        track["periods"].append({"started_at": left.astimezone(tz).isoformat(),
+                                 "ended_at": right.astimezone(tz).isoformat(), "seconds": seconds})
+        total += seconds
+    return total
 
 
 def summarize_day(projects_or_logs, selected_date, tz=None):
@@ -158,8 +190,8 @@ def summarize_day(projects_or_logs, selected_date, tz=None):
     if type(selected_date) is not date:
         raise ValueError("Choose a calendar date for statistics.")
     tz = ZoneInfo(tz) if isinstance(tz, str) else (tz or local_timezone())
-    start = datetime.combine(selected_date, time.min, tzinfo=tz).astimezone(UTC)
-    end = datetime.combine(selected_date + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
+    start = _day_start(selected_date, tz)
+    end = _day_start(selected_date + timedelta(days=1), tz)
     # Repeated local hours share a column, which can exceed 60 minutes.
     bins = [0.0] * 24
     periods = [[] for _ in range(24)]
@@ -206,21 +238,7 @@ def summarize_day(projects_or_logs, selected_date, tz=None):
             left, right = bounds
             sessions.append({**metadata, "started_at": left.astimezone(tz).isoformat(),
                              "ended_at": right.astimezone(tz).isoformat(), "seconds": seconds})
-        windows = [(_parse(span["started_at"]), _parse(span["ended_at"])) for span in work] if work is not None else None
-        window_ends = [finish for _, finish in windows] if windows is not None else []
-        for interval in (details or {}).get("music", []):
-            title = interval.get("title", "").strip()
-            if not title:
-                continue
-            for left, right, weight in _music_parts(interval, start, end, windows, window_ends):
-                seconds = (right-left).total_seconds() * weight
-                key = (title, interval.get("artist", ""), interval.get("player", ""))
-                track = tracks.setdefault(key, {"title": key[0], "artist": key[1], "player": key[2],
-                                                "seconds": 0.0, "periods": []})
-                track["seconds"] += seconds
-                track["periods"].append({"started_at": left.astimezone(tz).isoformat(),
-                                         "ended_at": right.astimezone(tz).isoformat(), "seconds": seconds})
-                music_seconds += seconds
+        music_seconds += _add_music_tracks(tracks, details or {}, work, start, end, tz)
     return {
         "date": selected_date.isoformat(), "timezone": getattr(tz, "key", str(tz)),
         "hourly_seconds": bins, "hourly_minutes": [seconds / 60 for seconds in bins],

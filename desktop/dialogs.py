@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from PySide6.QtCore import QDate, QTime, Qt, Signal
+from PySide6.QtCore import QDate, QTime, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
@@ -467,8 +467,9 @@ class _PeriodEndpoint(QWidget):
         super().__init__(parent)
         self.zone = local_timezone()
         self.original = stamp.astimezone(self.zone)
-        self.date_input = _date_input(self.original.date(), minimum)
-        self.date_input.setMaximumDate(_qdate(date.today()))
+        # Display imported times unchanged; Save reports invalid dates.
+        self.date_input = _date_input(self.original.date(), min(minimum, self.original.date()))
+        self.date_input.setMaximumDate(_qdate(max(date.today(), self.original.date())))
         self.date_input.button.setAccessibleName('Choose period date')
         self.time_input = QTimeEdit(QTime(self.original.hour, self.original.minute, self.original.second))
         self.time_input.setDisplayFormat('HH:mm:ss')
@@ -534,6 +535,7 @@ class WorkPeriodEditor(QWidget):
                             datetime.fromisoformat(span['ended_at'].replace('Z', '+00:00')))
 
     def add_period(self, start=None, end=None):
+        added_by_user = start is None
         if start is None:
             try:
                 start = self.rows[-1][2].value() if self.rows else datetime.now().astimezone()
@@ -565,6 +567,16 @@ class WorkPeriodEditor(QWidget):
         remove.clicked.connect(lambda: self.remove_period(entry))
         self._fit_rows()
         self.changed.emit()
+        if added_by_user:
+            # Wait for the new row's geometry before scrolling to its inputs.
+            QTimer.singleShot(0, widget, lambda: self._reveal_period(widget, beginning))
+
+    def _reveal_period(self, widget, beginning):
+        self.period_layout.activate()
+        self.content.adjustSize()
+        self.scroll.ensureWidgetVisible(widget)
+        beginning.time_input.setFocus()
+        beginning.time_input.selectAll()
 
     def remove_period(self, entry):
         self.rows.remove(entry)
@@ -605,7 +617,7 @@ class WorkLogDialog(_InputDialog):
         self.project, self.log = project, log
         self.date_edit = _date_input(log.worked_on if log else (initial_date or date.today()), project.start_date)
         self.date_edit.setMaximumDate(_qdate(date.today()))
-        confirmed = getattr(log, 'work_intervals', None) if log else initial_intervals
+        confirmed = log.work_intervals if log else initial_intervals
         self.legacy = log is not None and confirmed is None
         spans = confirmed
         if spans is None and log and log.focus_details:
@@ -615,7 +627,10 @@ class WorkLogDialog(_InputDialog):
             if initial_date and initial_date != end.date():
                 end = datetime.combine(initial_date, end.timetz())
             minimum = datetime.combine(project.start_date, datetime.min.time(), tzinfo=local_timezone())
-            start = end if self.legacy or initial_intervals is not None else max(minimum, end - timedelta(minutes=initial_minutes or 25))
+            if self.legacy or initial_intervals is not None:
+                start = end
+            else:
+                start = max(minimum, end - timedelta(minutes=initial_minutes or 25))
             spans = [{'started_at': start.isoformat(), 'ended_at': end.isoformat(),
                       'seconds': (end-start).total_seconds()}]
         self.period_editor = WorkPeriodEditor(spans, project.start_date)
@@ -685,9 +700,14 @@ class WorkLogDialog(_InputDialog):
             seconds = sum(span['seconds'] for span in spans)
             self.duration_label.setText(f'{minutes} min')
             previous = f'Previously recorded: {self.log.minutes} min. ' if self.legacy else ''
-            exact = (f'{seconds:.3f}s' if seconds < 1 else f'{seconds:.1f}s') if seconds < 60 else f'{seconds / 60:.2f} minutes'
             if seconds < .001:
                 exact = '<0.001s'
+            elif seconds < 1:
+                exact = f'{seconds:.3f}s'
+            elif seconds < 60:
+                exact = f'{seconds:.1f}s'
+            else:
+                exact = f'{seconds / 60:.2f} minutes'
             periods = 'period' if len(spans) == 1 else 'periods'
             self.duration_hint.setText(previous + f'{len(spans)} {periods} · {exact} of work. Partial minutes round up once per record; pauses between periods are excluded.')
         except ValueError as exc:

@@ -6,7 +6,8 @@ import math
 from time import monotonic
 
 
-def _aware_datetime(value):
+def parse_timestamp(value):
+    """Read an ISO timestamp and require its explicit UTC offset."""
     if not isinstance(value, str):
         raise ValueError("Activity timestamps must be ISO text with a time zone.")
     try:
@@ -16,6 +17,12 @@ def _aware_datetime(value):
     if result.tzinfo is None or result.utcoffset() is None:
         raise ValueError("Activity timestamps need an explicit time zone.")
     return result
+
+
+def interval_microseconds(start, end):
+    """Measure endpoints exactly, including daylight-saving changes."""
+    elapsed = end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
+    return (elapsed.days * 86400 + elapsed.seconds) * 1_000_000 + elapsed.microseconds
 
 
 def _seconds(value):
@@ -46,8 +53,8 @@ def _validate_intervals(entries, *, music=False):
     for interval in entries:
         if not isinstance(interval, dict) or set(interval) != expected:
             raise ValueError("Invalid activity interval fields.")
-        start = _aware_datetime(interval["started_at"])
-        end = _aware_datetime(interval["ended_at"])
+        start = parse_timestamp(interval["started_at"])
+        end = parse_timestamp(interval["ended_at"])
         seconds = _seconds(interval["seconds"])
         if end < start or (previous_end is not None and start < previous_end):
             raise ValueError("Activity intervals must be ordered without overlaps.")
@@ -79,15 +86,9 @@ def validate_focus_details(details):
         raise ValueError("Measured focus time must match its active segments.")
     segment_index = 0
     for start, end, _ in songs:
-        # Scan the sorted lists once to check songs stay inside focus intervals.
-        while segment_index < len(segments):
-            segment_start, segment_end, _ = segments[segment_index]
-            if segment_start <= start <= end <= segment_end:
-                break
-            if segment_end < end:
-                segment_index += 1
-            else:
-                break
+        # Find the first active period that could contain this song's end.
+        while segment_index < len(segments) and segments[segment_index][1] < end:
+            segment_index += 1
         if segment_index >= len(segments) or not (
                 segments[segment_index][0] <= start <= end <= segments[segment_index][1]):
             raise ValueError("Music observations must lie inside an active focus segment.")
@@ -98,15 +99,20 @@ def validate_work_intervals(intervals):
     if not isinstance(intervals, list) or not intervals:
         raise ValueError("Add at least one work period.")
     parsed = _validate_intervals(intervals)
-    if any(seconds <= 0 or end.astimezone(timezone.utc) <= start.astimezone(timezone.utc)
-           for start, end, seconds in parsed):
-        raise ValueError("Each work period must end after it starts.")
+    for start, end, seconds in parsed:
+        if seconds <= 0 or interval_microseconds(start, end) <= 0:
+            raise ValueError("Each work period must end after it starts.")
     return parsed
 
 
 def work_interval_minutes(intervals):
     """Round the combined active periods up once to whole recorded minutes."""
-    return math.ceil(sum(seconds for _, _, seconds in validate_work_intervals(intervals)) / 60)
+    microseconds = 0
+    for start, end, _ in validate_work_intervals(intervals):
+        microseconds += interval_microseconds(start, end)
+    # Endpoints are authoritative; the old float seconds field is only a cache.
+    minute = 60_000_000
+    return (microseconds + minute - 1) // minute
 
 
 class ActivityCapture:
@@ -154,7 +160,7 @@ class ActivityCapture:
         wall, now = self._wall_now(), self._now()
         # Clamp a backwards wall-clock change to the previous segment end.
         if self._segments:
-            last_end = _aware_datetime(self._segments[-1]["ended_at"])
+            last_end = parse_timestamp(self._segments[-1]["ended_at"])
             wall = max(wall, last_end)
         self._segment_start = wall, now
         self.state = "running"

@@ -17,7 +17,10 @@ class JsonRepository:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("Saved JSON is damaged. The file has not been replaced.") from exc
-        if not isinstance(data, dict) or data.get("schema_version") != 1:
+        if not isinstance(data, dict):
+            raise ValueError("Unsupported save format. The file has not been replaced.")
+        version = data.get("schema_version")
+        if type(version) is not int or version != 1:
             raise ValueError("Unsupported save format. The file has not been replaced.")
         return data
 

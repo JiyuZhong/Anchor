@@ -6,7 +6,7 @@ A Python desktop study room for planning projects, recording focused work and ke
 
 ## Install
 
-Download from [Anchor 1.1.2](https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2).
+Download from [Anchor 1.1.3](https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.3).
 
 | Download | Use |
 | --- | --- |
@@ -43,6 +43,8 @@ Preview projects and music entries are fictional. Preview changes are discarded 
 ## Source layout
 
 `app.py` starts the program. `planner/` handles models, calculations, observations and JSON storage. `desktop/` contains the native interface and room drawing. `tools/` builds source and installation packages. [The architecture guide](docs/ARCHITECTURE.md) explains the main data flow.
+
+For a code review, start with `planner/models.py`, then `service.py` and `planning.py`. Validation is grouped by project settings, tasks and records. Daily totals are calculated once and reused; confirmed durations use exact timestamp endpoints. Unused furniture and reward modules are omitted.
 
 The core walkthrough uses Python's standard library:
 

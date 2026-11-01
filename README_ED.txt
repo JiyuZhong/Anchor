@@ -11,10 +11,10 @@ either player. Project data is stored locally.
 
 EXTERNAL FILES
 Project repository: https://github.com/JiyuZhong/Anchor
-Download URL: https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2
-Mac app: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.2/Anchor-macOS-AppleSilicon.zip
-Offline source kit: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.2/Anchor-Offline-Source.zip
-Portable source: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.2/Anchor-Source.zip
+Download URL: https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.3
+Mac app: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.3/Anchor-macOS-AppleSilicon.zip
+Offline source kit: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.3/Anchor-Offline-Source.zip
+Portable source: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.3/Anchor-Source.zip
 
 The repository's Release assets should contain these two final archives:
   Anchor-macOS-AppleSilicon.zip   Offline app, includes Python and Qt.
@@ -24,7 +24,7 @@ The course permits external files exceeding Ed's 2 MB limit. The Python files
 and this README must still be uploaded to Ed as instructed. Check the tutor's
 download permissions. Keep hosted files unchanged after the course deadline.
 The repository is public. The two runtime archives are supplied as assets of
-release v1.1.2. Their uploaded sizes and SHA256 values match the locally tested
+release v1.1.3. Their uploaded sizes and SHA256 values match the locally tested
 files. The submission verification record documents the final access check.
 Keep these hosted files unchanged after the course deadline.
 

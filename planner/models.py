@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from uuid import uuid4
+import math
 import re
 
 from .activity import validate_focus_details, validate_work_intervals, work_interval_minutes
@@ -22,6 +23,8 @@ def positive_minutes(value: int) -> None:
 
 @dataclass
 class TaskNode:
+    """A task can contain one level of smaller tasks."""
+
     title: str
     id: str = field(default_factory=new_id)
     completed: bool = False
@@ -35,7 +38,7 @@ class TaskNode:
             found = child.find(task_id)
             if found is not None:
                 return found
-        return None  # No match in this branch.
+        return None
 
     def is_complete(self) -> bool:
         # Leaves store their status; stages use all child statuses.
@@ -46,7 +49,7 @@ class TaskNode:
     @classmethod
     def from_dict(cls, data: dict, depth: int = 2) -> TaskNode:
         if depth > 3:
-            raise ValueError("Maximum depth is project -> stage -> task.")
+            raise ValueError("Maximum depth is project -> task -> subtask.")
         values = dict(data)
         values["children"] = [cls.from_dict(c, depth + 1) for c in values["children"]]
         return cls(**values)
@@ -73,6 +76,14 @@ class WorkLog:
     def from_dict(cls, data: dict) -> WorkLog:
         values = dict(data)
         values["worked_on"] = date.fromisoformat(values["worked_on"])
+        intervals = values.get("work_intervals")
+        if intervals is not None:
+            exact_minutes = work_interval_minutes(intervals)
+            old_minutes = math.ceil(sum(span["seconds"] for span in intervals) / 60)
+            # Older saves could round a floating-point error into one extra minute.
+            if (type(values["minutes"]) is int and values["minutes"] == old_minutes
+                    and old_minutes == exact_minutes + 1):
+                values["minutes"] = exact_minutes
         return cls(**values)
 
 
@@ -123,6 +134,9 @@ class Project:
 
 
 def validate_project(project: Project) -> None:
+    """Check project settings, then its task tree and work records."""
+    if not isinstance(project.id, str) or not project.id.strip():
+        raise ValueError("Project ID must be non-empty text.")
     if not isinstance(project.title, str) or not project.title.strip():
         raise ValueError("Project title cannot be empty.")
     if type(project.start_date) is not date or (project.deadline is not None and type(project.deadline) is not date):
@@ -145,6 +159,12 @@ def validate_project(project: Project) -> None:
     for value in (project.image_path, project.related_project_id, project.archived_at):
         if value is not None and not isinstance(value, str):
             raise ValueError("Optional project references must be text or None.")
+    task_ids = _validate_tasks(project.tasks)
+    _validate_logs(project, task_ids)
+
+
+def _validate_tasks(tasks: list[TaskNode]) -> set[str]:
+    """Return the unique IDs that work records are allowed to reference."""
     task_ids = set()
 
     def visit(nodes: list[TaskNode], depth: int) -> None:
@@ -154,8 +174,10 @@ def validate_project(project: Project) -> None:
             if not isinstance(node, TaskNode):
                 raise ValueError("Each task must be a task node.")
             if depth > 3:
-                raise ValueError("Maximum depth is project -> stage -> task.")
-            if not node.id or node.id in task_ids:
+                raise ValueError("Maximum depth is project -> task -> subtask.")
+            if not isinstance(node.id, str) or not node.id.strip():
+                raise ValueError("Task ID must be non-empty text.")
+            if node.id in task_ids:
                 raise ValueError("A task cannot occur twice or contain itself.")
             task_ids.add(node.id)
             if not isinstance(node.title, str) or not node.title.strip():
@@ -164,17 +186,29 @@ def validate_project(project: Project) -> None:
                 raise ValueError("Task status must be True or False.")
             visit(node.children, depth + 1)
 
-    visit(project.tasks, 2)  # The project itself counts as level 1.
+    visit(tasks, 2)  # The project itself counts as level 1.
+    return task_ids
+
+
+def _validate_logs(project: Project, task_ids: set[str]) -> None:
+    """Check dates, task references and the duration of each work record."""
+    if not isinstance(project.logs, list):
+        raise ValueError("Work records must be a list.")
     log_ids = set()
     for log in project.logs:
+        if not isinstance(log, WorkLog):
+            raise ValueError("Each work record must be a WorkLog.")
         positive_minutes(log.minutes)
-        if not log.id or log.id in log_ids:
+        if not isinstance(log.id, str) or not log.id.strip():
+            raise ValueError("Work-log ID must be non-empty text.")
+        if log.id in log_ids:
             raise ValueError("Duplicate or empty work-log ID.")
         log_ids.add(log.id)
         if type(log.worked_on) is not date or log.worked_on < project.start_date:
             raise ValueError("Work cannot predate the project.")
-        if log.task_id is not None and log.task_id not in task_ids:
-            raise ValueError("A work log refers to a missing task.")
+        if log.task_id is not None:
+            if not isinstance(log.task_id, str) or log.task_id not in task_ids:
+                raise ValueError("A work log refers to a missing task.")
         if not isinstance(log.note, str):
             raise ValueError("Work-log note must be text.")
         if not isinstance(log.source, str) or log.source not in ("manual", "focus"):
