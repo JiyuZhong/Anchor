@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/
+output/
+dist/
+build/
+*.spec
+wheelhouse/
+.submission-build/
+separate_materials/
+submission/

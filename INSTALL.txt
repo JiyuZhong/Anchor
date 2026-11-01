@@ -1,0 +1,68 @@
+ANCHOR 1.1.0 - INSTALLATION
+
+Downloads:
+https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.0
+
+1. APPLE SILICON MAC APP
+Download Anchor-macOS-AppleSilicon.zip and extract the complete archive.
+Open Anchor.app. Python and Qt are included; no pip setup is required.
+Open Preview.command starts disposable sample projects.
+
+The app is for Apple Silicon macOS, not Windows/Linux or Intel-only Macs.
+This student build is ad-hoc signed and is not Apple-notarised. If macOS blocks
+it, use the standard Open Anyway option in System Settings > Privacy & Security.
+
+2. PORTABLE SOURCE
+Download Anchor-Source.zip and extract it into a writable folder. Use CPython
+3.10, 3.11, 3.12 or 3.13. Python 3.14 is not supported by the pinned Qt package.
+
+macOS / Linux:
+  python3 -m venv .venv
+  .venv/bin/python -m pip install -r requirements.txt
+  .venv/bin/python app.py --preview
+
+Windows:
+  py -3.12 -m venv .venv
+  .venv\Scripts\python.exe -m pip install -r requirements.txt
+  .venv\Scripts\python.exe app.py --preview
+
+On macOS, Launch Anchor.command can prepare the local environment and launch
+the application. The first online setup needs an internet connection.
+Omit --preview to keep a personal profile. The GUI requires a graphical desktop.
+The dependency is PySide6-Essentials==6.8.3, with its matching Shiboken package.
+
+3. SOURCE WITH OFFLINE DEPENDENCIES
+Download Anchor-Offline-Source.zip and extract the entire archive. Keep its
+wheelhouse/ folder next to OFFLINE_SETUP.py and requirements.txt.
+An existing CPython 3.10-3.13 interpreter is still required.
+
+macOS / Linux:
+  python3 OFFLINE_SETUP.py --launch --preview
+Windows:
+  py -3.12 OFFLINE_SETUP.py --launch --preview
+
+The installer verifies the wheel hashes, creates .venv and installs from the
+supplied wheels without accessing a package index. It includes macOS universal2,
+Windows x86_64 and Linux x86_64 wheels. Linux requires glibc 2.28+ and suitable
+Qt desktop system libraries. Windows ARM64 and Linux ARM64/musl are not supplied.
+Only macOS execution has been checked locally; supplied wheels do not constitute
+an independent run on every supported operating system.
+
+4. DATA AND MUSIC
+Source mode saves to data/ beside app.py. The bundled Mac app instead uses:
+  ~/Library/Application Support/Anchor/
+Back up the whole profile folder, including imported pictures.
+Preview uses temporary data and discards changes on exit.
+
+Spotify / Apple Music controls are optional and macOS only. Open the player,
+select it in Anchor and press Connect. macOS may ask for Automation permission.
+Anchor controls the external application; it does not provide a streaming
+subscription or a built-in audio library. Planning works without a player.
+
+5. CORE WALKTHROUGH
+The planning example uses Python's standard library and does not need Qt:
+  python3 app.py --demo
+
+Anchor-Ed-Code.zip contains the Python source and course running instructions.
+The course still requires direct Python-file and README submission to Ed.
+Upstream license texts are preserved in the runtime/offline archives.

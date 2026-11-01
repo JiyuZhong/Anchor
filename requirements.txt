@@ -1,0 +1,3 @@
+# Core logic uses only Python's standard library.
+# Essentials provides QtCore, QtGui and QtWidgets without WebEngine or Addons.
+PySide6-Essentials==6.8.3
