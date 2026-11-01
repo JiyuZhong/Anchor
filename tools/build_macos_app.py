@@ -62,8 +62,8 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Anchor',
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='Anchor')
 app = BUNDLE(coll, name='Anchor.app', icon=None,
              bundle_identifier='org.comp9001.anchor',
-             info_plist={{'CFBundleShortVersionString': '1.1.1',
-                          'CFBundleVersion': '3',
+             info_plist={{'CFBundleShortVersionString': '1.1.2',
+                          'CFBundleVersion': '4',
                           'NSHighResolutionCapable': True,
                           'NSAppleEventsUsageDescription':
                           'Anchor controls your selected music player only after you press Connect or a playback control.'}})

@@ -45,9 +45,13 @@ A goal may have a deadline or continue without one. Set a daily target and daily
 maximum. The original total estimate of a dated project stays fixed. An ongoing
 goal tracks each day's target and keeps a separate lifetime total. Completing a
 task or outcome is separate from recording time.
+For a new dated goal, daily effort and total effort are linked across the
+inclusive date range. The last field you edit drives the calculation; a daily
+amount calculated from a total rounds up without changing your chosen total.
 
-Focus is a count-up timer. Start, pause, resume, then finish and confirm the
-actual minutes, work date and task before saving. Cancelling that form leaves
+Focus is a count-up timer. Start, pause, resume, then finish and adjust the
+actual start/end periods and task before saving. Minutes are calculated from
+the combined periods, rounding partial minutes up once. Cancelling that form leaves
 the session paused. Page changes and hiding the interface do not stop the timer.
 
 CATCH-UP
@@ -70,12 +74,16 @@ Records -> Overview shows a selected day for one goal or all goals. Move across
 the chart to inspect each hour. The readout stays above the plot. Left/right
 keys also inspect hours; Esc clears the inspection.
 
-Bars use saved timer observations and exclude pauses. Confirmed record minutes
-and dates can be corrected separately. A correction does not move the observed
-timeline. Older/manual entries without timing keep their totals but have no
-guessed hourly bars. The chart updates after a focus session is saved.
+Bars use confirmed work periods, including manually added periods, and exclude
+gaps between them. Editing start/end times changes the duration and chart
+together. Original timer observations remain available. Older records keep
+their existing minutes until you explicitly set periods; missing hours are
+never guessed. Cross-midnight work is split between local dates without
+duplicating its rounded total. The chart updates after a record is saved.
 
 Music entries show tracks observed while focusing and connected to a player.
+Only observations inside the saved work periods are shown; adjusting a period
+does not add or shift listening history.
 Track boundaries are approximate because player status is read every two seconds.
 
 BOOKS AND COLLECTION
@@ -142,5 +150,5 @@ File I/O is used to save and restore records; recursion is used to search and
 total nested tasks. See docs/ARCHITECTURE.md for the main data flow.
 
 DOWNLOAD AND INSTALLATION
-https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.1
+https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2
 INSTALL.txt explains the Mac app, portable source and offline dependency kit.

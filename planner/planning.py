@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from .models import Project, TaskNode
+from .statistics import local_timezone, recorded_minutes_by_day, recorded_minutes_on
 
 
 def time_bar(project: Project) -> dict:
@@ -29,14 +30,15 @@ def gentle_bonus_limit(project: Project) -> int:
                max(project.daily_limit_minutes - project.daily_minutes, 0))
 
 
-def _minutes_on(project: Project, on: date) -> int:
-    return sum(log.minutes for log in project.logs if log.worked_on == on)
+def _minutes_on(project: Project, on: date, tz=None) -> int:
+    tz = tz or local_timezone()
+    return sum(recorded_minutes_on(log, on, tz) for log in project.logs)
 
 
-def _ongoing_bonus(project: Project, today: date) -> int:
+def _ongoing_bonus(project: Project, today: date, tz=None) -> int:
     if not project.catch_up_enabled or today <= project.start_date:
         return 0
-    gap = max(project.daily_minutes - _minutes_on(project, today - timedelta(days=1)), 0)
+    gap = max(project.daily_minutes - _minutes_on(project, today - timedelta(days=1), tz), 0)
     # Use yesterday's base-goal gap; +2 rounds division by three up.
     return min((gap + 2) // 3, gentle_bonus_limit(project))
 
@@ -46,12 +48,13 @@ def suggest_schedule(project: Project, from_date: date) -> dict:
     if project.archived_at is not None:
         return {"days": [], "unscheduled_minutes": 0, "archived": True}
     start = max(from_date, project.start_date)
+    tz = local_timezone()
     days = []
     if project.deadline is None:
         for offset in range(7):
             on = start + timedelta(days=offset)
-            already = _minutes_on(project, on)
-            bonus = _ongoing_bonus(project, from_date) if on == from_date else 0
+            already = _minutes_on(project, on, tz)
+            bonus = _ongoing_bonus(project, from_date, tz) if on == from_date else 0
             target = min(project.daily_limit_minutes, project.daily_minutes + bonus)
             days.append({"date": on.isoformat(), "additional_minutes": max(target - already, 0)})
         return {"days": days, "unscheduled_minutes": 0, "archived": False}
@@ -62,7 +65,7 @@ def suggest_schedule(project: Project, from_date: date) -> dict:
     target_limit = min(project.daily_limit_minutes, project.daily_minutes + bonus_limit)
     for offset in range(day_count):
         on = start + timedelta(days=offset)
-        already = _minutes_on(project, on)
+        already = _minutes_on(project, on, tz)
         days_left = day_count - offset
         # Add today's work back before finding the daily total. Logging time
         # then reduces what remains, without raising the day's target.
@@ -78,6 +81,7 @@ def suggest_schedule(project: Project, from_date: date) -> dict:
 def recovery_summary(project: Project, today: date) -> dict:
     """Summarise today's pace, extra time and remaining work for the interface."""
     schedule = suggest_schedule(project, today)
+    tz = local_timezone()
     ongoing = project.deadline is None
     baseline = project.daily_minutes
     yesterday = today - timedelta(days=1)
@@ -85,19 +89,20 @@ def recovery_summary(project: Project, today: date) -> dict:
     if ongoing:
         yesterday_target = baseline if yesterday >= project.start_date else 0
         expected_before = yesterday_target
-        recorded_before = _minutes_on(project, yesterday)
+        recorded_before = _minutes_on(project, yesterday, tz)
     else:
         total_days = max((project.deadline - project.start_date).days + 1, 0)
         elapsed_days = min(elapsed_days, total_days)
         expected_before = min(project.planned_minutes, elapsed_days * baseline)
-        recorded_before = sum(log.minutes for log in project.logs if log.worked_on < today)
+        recorded_before = sum(minutes for log in project.logs
+                              for on, minutes in recorded_minutes_by_day(log, tz).items() if on < today)
         yesterday_target = 0
         if project.start_date <= yesterday <= project.deadline:
             earlier_days = (yesterday - project.start_date).days
             yesterday_target = min(baseline, max(project.planned_minutes - earlier_days * baseline, 0))
     unrecorded = max(expected_before - recorded_before, 0)
-    yesterday_recorded = _minutes_on(project, yesterday)
-    today_recorded = _minutes_on(project, today)
+    yesterday_recorded = _minutes_on(project, yesterday, tz)
+    today_recorded = _minutes_on(project, today, tz)
     # Use the schedule's target; the earlier totals explain how it changed.
     today_entry = next((day for day in schedule["days"] if day["date"] == today.isoformat()), None)
     additional = today_entry["additional_minutes"] if today_entry else 0
@@ -143,7 +148,7 @@ def recovery_summary(project: Project, today: date) -> dict:
         "ongoing": ongoing,
         "catch_up_enabled": project.catch_up_enabled,
         "catch_up_scope": "yesterday" if ongoing else "remaining_plan",
-        "spread_per_day_minutes": (_ongoing_bonus(project, today) if ongoing else
+        "spread_per_day_minutes": (_ongoing_bonus(project, today, tz) if ongoing else
                                    ((unrecorded + len(schedule["days"]) - 1) // len(schedule["days"]) if schedule["days"] else 0)),
         "today_recorded_minutes": today_recorded,
         "today_baseline_minutes": usual_part,

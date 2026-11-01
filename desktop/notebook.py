@@ -1,8 +1,9 @@
 """Notebook pages for tasks, daily plans and time records."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer
+from PySide6.QtGui import QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QListWidget, QListWidgetItem,
     QMenu, QStackedWidget, QTabBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -10,7 +11,63 @@ from PySide6.QtWidgets import (
 
 from .daily_plan import build_daily_plan, build_recovery_card
 from .record_stats import RecordStatsPanel
-from planner.statistics import local_timezone
+from planner.statistics import local_timezone, recorded_minutes_on
+
+
+def _record_span(start, end, *, dates=False):
+    """Keep short intervals visibly different, down to fractions if needed."""
+    dates = dates or start.date() != end.date()
+    elapsed = (end.astimezone(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()
+    seconds = bool(start.second or end.second or start.microsecond or end.microsecond
+                   or elapsed < 60)
+    fraction = 0
+    if 0 < elapsed < 1 and start.replace(microsecond=0) == end.replace(microsecond=0):
+        fraction = 3 if start.microsecond // 1000 != end.microsecond // 1000 else 6
+
+    def stamp(value):
+        text = value.strftime(("%d %b " if dates else "") + ("%H:%M:%S" if seconds else "%H:%M"))
+        if fraction:
+            text += "." + f"{value.microsecond:06d}"[:fraction]
+        if start.utcoffset() != end.utcoffset():
+            offset = value.strftime("%z")
+            text += " " + offset[:3] + ":" + offset[3:]
+        return text
+
+    return stamp(start) + "–" + stamp(end)
+
+
+def _local_spans(intervals):
+    zone = local_timezone()
+    return [(datetime.fromisoformat(span["started_at"].replace("Z", "+00:00")).astimezone(zone),
+             datetime.fromisoformat(span["ended_at"].replace("Z", "+00:00")).astimezone(zone))
+            for span in intervals]
+
+
+class _TaskTree(QTreeWidget):
+    """Draw branch controls with the same contrast as the task text."""
+
+    def drawBranches(self, painter, rect, index):
+        item = self.itemFromIndex(index)
+        if item is None or not item.childCount():
+            return
+        x = rect.right() - self.indentation() / 2 + 1
+        y = rect.center().y()
+        arrow = QPainterPath()
+        if item.isExpanded():
+            arrow.moveTo(x - 4, y - 2)
+            arrow.lineTo(x, y + 2)
+            arrow.lineTo(x + 4, y - 2)
+        else:
+            arrow.moveTo(x - 2, y - 4)
+            arrow.lineTo(x + 2, y)
+            arrow.lineTo(x - 2, y + 4)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(self.palette().color(QPalette.ColorRole.Text), 1.6,
+                            Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(arrow)
+        painter.restore()
 
 
 class TaskPages(QWidget):
@@ -22,13 +79,17 @@ class TaskPages(QWidget):
         self.capacity = 5
         self._paging = False
         self._fit_pending = False
+        collapsed = getattr(window, "_collapsed_task_ids", {})
+        window._collapsed_task_ids = collapsed
+        self.collapsed_ids = collapsed.setdefault(project.id, set())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 8, 0, 0)
         layout.setSpacing(8)
         layout.addLayout(row(button("+ Task", window.add_task), button("+ Subtask", window.add_subtask),
                              button("Rename", window.rename_task, "ghost"), button("Delete", window.delete_task, "ghost")))
         layout.addWidget(label("Select a name to focus. Tick a box to mark a step complete.", "muted", True))
-        self.tree = QTreeWidget()
+        self.tree = _TaskTree()
+        self.tree.setIndentation(22)
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["Task", "Recorded"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -65,6 +126,7 @@ class TaskPages(QWidget):
                 item.setData(0, Qt.ItemDataRole.UserRole, node.id)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, bool(node.children))
                 if node.children:
+                    item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
                     item.setText(0, ("✓  " if node.is_complete() else "◦  ") + node.title)
                 else:
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -74,9 +136,12 @@ class TaskPages(QWidget):
 
         add_nodes(project.tasks)
         self.tree.expandAll()
+        for item in self.items():
+            if item.data(0, Qt.ItemDataRole.UserRole) in self.collapsed_ids:
+                item.setExpanded(False)
         self.tree.itemChanged.connect(window.toggle_task)
-        self.tree.itemExpanded.connect(self.repage)
-        self.tree.itemCollapsed.connect(self.repage)
+        self.tree.itemExpanded.connect(self.branch_changed)
+        self.tree.itemCollapsed.connect(self.branch_changed)
         layout.addWidget(self.tree, 1)
         pager = QHBoxLayout()
         self.previous = button("←", lambda: self.move(-1), "ghost")
@@ -120,7 +185,11 @@ class TaskPages(QWidget):
                     keep.add(id(parent))
                     parent = parent.parent()
             for item in self.items():
-                item.setHidden(id(item) not in keep)
+                parent = item.parent()
+                while parent is not None and parent.isExpanded():
+                    parent = parent.parent()
+                # Collapsing is Qt's job; hidden flags are only for pagination.
+                item.setHidden(parent is None and id(item) not in keep)
             self.previous.setEnabled(self.page > 0)
             self.next.setEnabled(self.page < pages - 1)
             self.counter.setText(f"{self.page+1} / {pages}" if rows else "No tasks yet")
@@ -131,6 +200,17 @@ class TaskPages(QWidget):
                 self.tree.setCurrentItem(None)
         finally:
             self._paging = False
+
+    def branch_changed(self, item):
+        task_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if item.isExpanded():
+            self.collapsed_ids.discard(task_id)
+        else:
+            self.collapsed_ids.add(task_id)
+        rows = self.items(expanded_only=True)
+        if item in rows:
+            self.page = rows.index(item) // self.capacity
+        self.repage()
 
     def move(self, direction):
         self.page += direction
@@ -230,26 +310,36 @@ class RecordPages(QWidget):
         self.page = min(max(self.page, 0), pages - 1)
         for log in self.records[self.page*self.capacity:(self.page+1)*self.capacity]:
             details = log.focus_details
-            tooltip = log.note
-            description = log.note
-            if details and details["segments"]:
-                zone = local_timezone()
-                spans = [(datetime.fromisoformat(span["started_at"]).astimezone(zone),
-                          datetime.fromisoformat(span["ended_at"]).astimezone(zone))
-                         for span in details["segments"]]
-                description = f"Observed {spans[0][0]:%H:%M}–{spans[-1][1]:%H:%M} · {len(spans)} active interval(s)"
-                tooltip += "\nObserved focus (pauses excluded):\n" + "\n".join(
-                    f"{start:%d %b %H:%M}–{end:%d %b %H:%M}" for start, end in spans)
-                if details["music"]:
-                    tooltip += "\nObserved music:\n" + "\n".join(dict.fromkeys(
-                        song["title"] + (" — " + song["artist"] if song["artist"] else "") for song in details["music"]))
-            elif log.source == "focus":
-                description = "Focus · time of day was not captured"
+            tooltip = [log.note] if log.note else []
+            intervals = getattr(log, "work_intervals", None)
+            if intervals:
+                spans = _local_spans(intervals)
+                description = _record_span(spans[0][0], spans[-1][1])
+                if len(spans) > 1:
+                    description += f" · {len(spans)} intervals"
+                tooltip.append("Recorded intervals (pauses excluded):\n" + "\n".join(
+                    _record_span(start, end, dates=True) for start, end in spans))
+                tooltip.append("Calculated work total: " + duration(log.minutes))
+            elif details and details["segments"]:
+                spans = _local_spans(details["segments"])
+                description = "Captured " + _record_span(spans[0][0], spans[-1][1])
+                if len(spans) > 1:
+                    description += f" · {len(spans)} intervals"
+                tooltip.append("Original timer intervals (pauses excluded):\n" + "\n".join(
+                    _record_span(start, end, dates=True) for start, end in spans))
+                tooltip.append("Stored work total: " + duration(log.minutes))
+                if abs(log.minutes * 60 - details["measured_seconds"]) > 60:
+                    tooltip.append("The stored total differs from the captured timer. Edit the time intervals to recalculate it.")
+            else:
+                description = "No time range saved · edit to add one"
+            if details and details["music"]:
+                tooltip.append("Captured music (original timer):\n" + "\n".join(dict.fromkeys(
+                    song["title"] + (" — " + song["artist"] if song["artist"] else "") for song in details["music"])))
             note = self.listing.fontMetrics().elidedText(description, Qt.TextElideMode.ElideRight,
                                                         max(40, self.listing.viewport().width() - 24))
             item = QListWidgetItem(f"{log.worked_on.strftime('%d %b')}  ·  {duration(log.minutes)}" + ("\n" + note if note else ""))
             item.setData(Qt.ItemDataRole.UserRole, log.id)
-            item.setToolTip(tooltip.strip() or description)
+            item.setToolTip("\n\n".join(tooltip) or description)
             item.setSizeHint(QSize(0, 58))
             self.listing.addItem(item)
             if log.id == selected_id:
@@ -387,7 +477,7 @@ def build_notebook(window):
     stats.setSpacing(10)
     total = window.service.progress(project.id)["actual_minutes"]
     if project.deadline is None:
-        today = sum(log.minutes for log in project.logs if log.worked_on == window.service.today())
+        today = sum(recorded_minutes_on(log, window.service.today()) for log in project.logs)
         window.effort_bar = EffortBar(today, project.daily_minutes, project.color, caption="TODAY'S RHYTHM", lifetime=total)
     else:
         window.effort_bar = EffortBar(total, project.planned_minutes, project.color)

@@ -92,10 +92,17 @@ active intervals and track changes. Pausing closes the active interval; resuming
 starts another. Cancelling confirmation or failing a save retains the paused
 session. Successful saving or explicit discard clears it.
 
-A focus WorkLog may have `focus_details`, containing intervals, music and measured
-seconds. The user-confirmed date/minutes remain separate. Editing those values
-does not rewrite the original observations. Old records without details keep
-that field empty.
+A WorkLog may have `work_intervals`: ordered, non-overlapping start/end periods.
+The service derives minutes from their combined UTC duration, rounding up once.
+The work date is the first period's date. `recorded_minutes_by_day()` distributes
+cross-midnight records over local dates while preserving their integer total;
+planning, catch-up and daily displays use that same allocation.
+
+Focus records also retain `focus_details`, containing original timer and music
+observations. Confirming or correcting periods never rewrites those observations.
+The chart prefers confirmed periods and clips observed music to their intersection.
+Old records without confirmed periods retain their original values until the
+user explicitly supplies periods; note-only edits do not infer timestamps.
 
 Statistics clip saved intervals to the selected local date and bucket them by
 hour. UTC arithmetic handles midnight and daylight-saving changes. Repeated
@@ -140,6 +147,6 @@ Source mode saves beside app.py in `data/`. A frozen Mac app uses the user's
 temporary directory and cannot overwrite a personal profile. Unsaved running
 sessions are not recovered after a crash.
 
-The v1.1.1 release provides the consolidated source and installation packages.
+The v1.1.2 release provides the consolidated source and installation packages.
 The runtime app targets Apple Silicon; the offline source kit supplies Qt
 wheels for the documented platforms and needs Python 3.10-3.13.

@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from planner.planning import recovery_summary
+from planner.statistics import local_timezone, recorded_minutes_on
 
 
 def _label(text, role=None):
@@ -174,10 +175,11 @@ class DailyPlanPage(QWidget):
                 item.widget().hide()
                 item.widget().deleteLater()
         first = self.page_index * self.page_size
+        zone = local_timezone()
         entries = self.schedule["days"][first:first + self.page_size]
         for day in entries:
             on = date.fromisoformat(day["date"])
-            recorded = sum(log.minutes for log in self.project.logs if log.worked_on == on)
+            recorded = sum(recorded_minutes_on(log, on, zone) for log in self.project.logs)
             total = recorded + day["additional_minutes"]
             row = QFrame()
             row.setObjectName("subcard")

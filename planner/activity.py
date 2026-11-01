@@ -93,6 +93,22 @@ def validate_focus_details(details):
             raise ValueError("Music observations must lie inside an active focus segment.")
 
 
+def validate_work_intervals(intervals):
+    """Validate user-confirmed periods and return their parsed timestamps."""
+    if not isinstance(intervals, list) or not intervals:
+        raise ValueError("Add at least one work period.")
+    parsed = _validate_intervals(intervals)
+    if any(seconds <= 0 or end.astimezone(timezone.utc) <= start.astimezone(timezone.utc)
+           for start, end, seconds in parsed):
+        raise ValueError("Each work period must end after it starts.")
+    return parsed
+
+
+def work_interval_minutes(intervals):
+    """Round the combined active periods up once to whole recorded minutes."""
+    return math.ceil(sum(seconds for _, _, seconds in validate_work_intervals(intervals)) / 60)
+
+
 class ActivityCapture:
     """Capture one focus session until it is saved or discarded."""
 

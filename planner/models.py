@@ -7,7 +7,7 @@ from datetime import date, datetime
 from uuid import uuid4
 import re
 
-from .activity import validate_focus_details
+from .activity import validate_focus_details, validate_work_intervals, work_interval_minutes
 
 
 def new_id() -> str:
@@ -62,6 +62,7 @@ class WorkLog:
     id: str = field(default_factory=new_id)
     source: str = "manual"     # 'focus' means confirmed from a focus session.
     focus_details: dict | None = None  # Captured intervals; older records use None.
+    work_intervals: list[dict] | None = None  # Confirmed periods; never rewrite observations.
 
     def to_dict(self) -> dict:
         values = asdict(self)
@@ -181,5 +182,13 @@ def validate_project(project: Project) -> None:
         if log.focus_details is not None and log.source != "focus":
             raise ValueError("Only focus-session records can include observed activity.")
         validate_focus_details(log.focus_details)
+        if log.work_intervals is not None:
+            periods = validate_work_intervals(log.work_intervals)
+            if periods[0][0].date() != log.worked_on:
+                raise ValueError("The work date must match the first work period.")
+            if any(start.date() < project.start_date for start, _, _ in periods):
+                raise ValueError("Work periods cannot predate the project.")
+            if log.minutes != work_interval_minutes(log.work_intervals):
+                raise ValueError("Recorded minutes must match the work periods.")
         if datetime.fromisoformat(log.recorded_at).tzinfo is None:
             raise ValueError("Entry timestamps must include a time zone.")

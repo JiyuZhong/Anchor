@@ -38,11 +38,11 @@ QMenu::item { background: transparent; padding: 9px 24px 9px 12px; border-radius
 QMenu::item:selected { background: #e5eadc; color: #324b39; }
 QMenu::item:disabled { color: #a0a899; }
 QMenu::separator { height: 1px; background: #dfe3d5; margin: 5px 8px; }
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDateEdit, QComboBox {
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDateEdit, QTimeEdit, QComboBox {
  background: #faf9f4; color: #344136; border: 1px solid #d7dbcd; border-radius: 5px; padding: 8px;
  selection-background-color: #ccd8c7; selection-color: #293c2e; min-height: 19px;
 }
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #8b9c81; background: #fffef9; }
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus, QTimeEdit:focus { border-color: #8b9c81; background: #fffef9; }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
  color: #263b2e; border: 2px solid #71866b; padding: 7px;
 }
@@ -109,11 +109,11 @@ QWidget#statsMusic { border-top-color: #465448; }
 QMenu { background: #29343d; color: #dde2d7; border-color: #52604f; }
 QMenu::item:selected { background: #42523f; color: #e5ecd9; }
 QMenu::separator { background: #455247; }
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDateEdit, QComboBox {
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDateEdit, QTimeEdit, QComboBox {
  background: #202b31; color: #dce4d5; border-color: #4b5a4a;
  selection-background-color: #4e6448; selection-color: #ecf2e3;
 }
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { background: #26332f; border-color: #9aaf84; }
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus, QTimeEdit:focus { background: #26332f; border-color: #9aaf84; }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus { color: #f0f4e8; border-color: #b3c99d; }
 QComboBox QAbstractItemView { background: #29343a; color: #dce4d5; border-color: #4b5a4a; selection-background-color: #4b6044; selection-color: #eff4e5; }
 QTreeWidget, QListWidget { background: #263236; border-color: #455447; alternate-background-color: #2d3a39; }

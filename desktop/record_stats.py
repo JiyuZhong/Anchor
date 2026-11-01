@@ -1,4 +1,4 @@
-"""Daily focus totals, hourly bars and observed tracks."""
+"""Daily work periods, hourly bars and observed tracks."""
 
 from html import escape
 
@@ -28,12 +28,18 @@ def _button(text, action, accessible):
     return item
 
 
-def _duration(seconds):
-    if 0 < seconds < 60:
-        return f"{round(seconds)}s"
-    minutes = round(seconds / 60)
-    hours, rest = divmod(minutes, 60)
-    return f"{hours}h {rest:02d}m" if hours else f"{minutes}m"
+def _duration(seconds, *, precise=False):
+    if 0 < seconds < 1:
+        return "<1s"
+    whole_seconds = max(0, round(seconds))
+    minutes, rest = divmod(whole_seconds, 60)
+    hours, minute = divmod(minutes, 60)
+    if hours:
+        text = f"{hours}h {minute:02d}m"
+        return text + (f" {rest:02d}s" if precise and rest else "")
+    if minutes:
+        return f"{minutes}m" + (f" {rest:02d}s" if rest else "")
+    return f"{whole_seconds}s" if whole_seconds else "0m"
 
 
 class RecordStatsPanel(QWidget):
@@ -52,9 +58,9 @@ class RecordStatsPanel(QWidget):
         figure = QVBoxLayout()
         figure.setSpacing(0)
         self.total_label = _label()
-        self.total_label.setAccessibleName("Daily focus duration")
+        self.total_label.setAccessibleName("Daily timed work duration")
         self.total_label.setStyleSheet("font-family: Georgia; font-size: 34px; font-weight: 400;")
-        self.total_caption = _label("Focused", "muted")
+        self.total_caption = _label("Timed work", "muted")
         self.total_caption.setStyleSheet("font-size: 11px;")
         figure.addWidget(self.total_label)
         figure.addWidget(self.total_caption)
@@ -92,7 +98,7 @@ class RecordStatsPanel(QWidget):
         music.setSpacing(2)
         self.music_title = _label("Music", "muted")
         self.music_title.setStyleSheet("font-size: 11px; font-weight: 600;")
-        self.music_title.setToolTip("Tracks observed during saved focus intervals. Connect Spotify or Apple Music to capture music; polling every two seconds gives approximate boundaries.")
+        self.music_title.setToolTip("Tracks actually observed inside the saved work periods. Editing a work period does not invent or extend listening history. Player polling gives approximate boundaries.")
         music.addWidget(self.music_title, 1)
         self.previous_track = _button("‹", lambda: self.move_track(-1), "Previous observed tracks")
         self.next_track = _button("›", lambda: self.move_track(1), "Next observed tracks")
@@ -139,29 +145,35 @@ class RecordStatsPanel(QWidget):
     def refresh(self):
         project = self.window.service.get_project(self.project_id)
         projects = self.window.service.list_projects() if self.scope_combo.currentData() == "all" else [project]
-        # Confirmed record totals can differ from the timer's observed intervals.
         self.summary = summarize_day(projects, self.date_input.date().toPython())
-        measured = _duration(self.summary["measured_focus_seconds"])
-        recorded = self.summary["recorded_focus_minutes"]
+        timed_seconds = self.summary["timed_work_seconds"]
+        timed = _duration(timed_seconds, precise=True)
+        recorded = self.summary["recorded_focus_minutes"] + self.summary["manual_minutes"]
         if not self.summary["has_timing"] and recorded:
             self.total_label.setText(_duration(recorded * 60))
-            self.total_caption.setText("Recorded focus · timing unavailable")
+            self.total_caption.setText("Recorded · no time range")
         else:
-            self.total_label.setText(measured)
-            self.total_caption.setText("Focused" if abs(self.summary["measured_focus_seconds"] - recorded*60) < 1
-                                       else f"Focused · {recorded}m recorded focus")
-        self.total_label.setToolTip(f"{measured} captured · {recorded}m recorded focus. Captured duration uses observed timer intervals; the confirmed work date and minutes can be edited independently.")
+            self.total_label.setText(_duration(timed_seconds))
+            self.total_caption.setText("Timed work")
+        confirmed = self.summary["confirmed_work_seconds"]
+        earlier_timer = max(0, timed_seconds - confirmed)
+        self.total_label.setToolTip(
+            f"{timed} in work periods · {recorded}m recorded.\n"
+            f"{_duration(confirmed, precise=True)} user-confirmed · {_duration(earlier_timer, precise=True)} from earlier timer periods.\n"
+            "Confirmed periods determine recorded minutes, rounded up once per entry; bars retain exact seconds.\n"
+            "Edit start/end times to change a period and its duration together."
+        )
         self.total_label.setAccessibleDescription(self.total_label.toolTip())
         self.chart.set_minutes(self.summary["hourly_minutes"], self.summary["hourly_periods"])
         self.track_page = 0
         self.show_tracks()
-        if self.summary["untimed_focus_minutes"]:
-            text = f"{self.summary['untimed_focus_minutes']}m of focus has no captured time of day."
+        if self.summary["untimed_recorded_minutes"]:
+            text = f"{self.summary['untimed_recorded_minutes']}m in older entries has no time range."
         else:
             text = ""
         self.status_label.setText(text)
         self.status_label.setVisible(bool(text))
-        self.status_label.setToolTip("Older/manual records are never assigned guessed hours. Bars use observed timestamps; work-date edits only change the recorded total. Music is observed from the connected player, not a complete listening history. Repeated DST hours share a column.")
+        self.status_label.setToolTip("Bars use user-confirmed work periods, or original timer periods for earlier entries. Older entries without a time range are never assigned guessed hours. Music only includes actual observations inside those periods. Repeated daylight-saving hours share a column.")
 
     def show_tracks(self):
         tracks = self.summary.get("tracks", [])
@@ -174,13 +186,13 @@ class RecordStatsPanel(QWidget):
             if index < len(shown):
                 track = shown[index]
                 name = track["title"] + (" — " + track["artist"] if track["artist"] else "")
-                full = name + " · " + _duration(track["seconds"])
+                full = name + " · " + _duration(track["seconds"], precise=True)
                 label.setText(label.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, max(40, self.width()-84)))
                 amount.setText(_duration(track["seconds"]))
                 tooltip = full + ("\n" + track["player"] if track["player"] else "")
                 label.setToolTip("<qt>" + escape(tooltip).replace("\n", "<br>") + "</qt>")
             elif index == 0:
-                label.setText("No music captured")
+                label.setText("No music observed")
                 amount.setText("")
                 label.setToolTip("Connect Spotify or Apple Music before focusing to capture track changes. Unconnected periods remain unknown.")
             else:

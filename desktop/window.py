@@ -18,6 +18,7 @@ from planner import FocusTimer, JsonRepository
 from planner.activity import ActivityCapture
 from planner.books import BookService
 from planner.planning import recovery_summary
+from planner.statistics import local_timezone, recorded_minutes_on
 from planner.notes import normalize_notes, select_next_note
 from .book_editor import BookEditorDialog
 from .book_painting import draw_book
@@ -297,7 +298,8 @@ class AnchorWindow(QMainWindow):
 
     def refresh_home(self):
         projects = self.service.list_projects()
-        total = sum(log.minutes for project in projects for log in project.logs if log.worked_on == date.today())
+        zone = local_timezone()
+        total = sum(recorded_minutes_on(log, date.today(), zone) for project in projects for log in project.logs)
         active = sum(project.archived_at is None for project in projects)
         archived = len(projects) - active
         self.today_total.setText(duration(total))
@@ -794,15 +796,17 @@ class AnchorWindow(QMainWindow):
             return True
         self._pause_focus_measurement()
         project = self.service.get_project(self.session_project_id)
+        details = self.activity.snapshot()
         dialog = WorkLogDialog(project, initial_minutes=max(1, math.ceil(self.timer.elapsed_seconds() / 60)),
-                               initial_date=self.session_date, initial_task_id=self.session_task_id, parent=self)
-        dialog.subtitle_label.setText("Check the date and minutes. The chart keeps the timer's original intervals, with pauses excluded.")
+                               initial_date=self.session_date, initial_task_id=self.session_task_id, parent=self,
+                               initial_intervals=details["segments"])
+        dialog.subtitle_label.setText("Adjust your work periods. Pauses stay separate; the total and chart update together.")
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self.show_page("focus")
             return False
         try:
             self.service.add_work(project.id, **dialog.payload(), source="focus",
-                                  focus_details=self.activity.snapshot())
+                                  focus_details=details)
         except (ValueError, OSError) as exc:
             self.error(exc)
             self.show_page("focus")

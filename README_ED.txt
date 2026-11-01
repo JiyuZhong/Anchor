@@ -11,10 +11,10 @@ either player. Project data is stored locally.
 
 EXTERNAL FILES
 Project repository: https://github.com/JiyuZhong/Anchor
-Download URL: https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.1
-Mac app: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.1/Anchor-macOS-AppleSilicon.zip
-Offline source kit: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.1/Anchor-Offline-Source.zip
-Portable source: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.1/Anchor-Source.zip
+Download URL: https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2
+Mac app: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.2/Anchor-macOS-AppleSilicon.zip
+Offline source kit: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.2/Anchor-Offline-Source.zip
+Portable source: https://github.com/JiyuZhong/Anchor/releases/download/v1.1.2/Anchor-Source.zip
 
 The repository's Release assets should contain these two final archives:
   Anchor-macOS-AppleSilicon.zip   Offline app, includes Python and Qt.
@@ -24,7 +24,7 @@ The course permits external files exceeding Ed's 2 MB limit. The Python files
 and this README must still be uploaded to Ed as instructed. Check the tutor's
 download permissions. Keep hosted files unchanged after the course deadline.
 The repository is public. The two runtime archives are supplied as assets of
-release v1.1.1. Their uploaded sizes and SHA256 values match the locally tested
+release v1.1.2. Their uploaded sizes and SHA256 values match the locally tested
 files. The submission verification record documents the final access check.
 Keep these hosted files unchanged after the course deadline.
 
@@ -67,10 +67,12 @@ The deterministic command-line example uses only Python's standard library.
 It demonstrates the planning/persistence core; it is not the full GUI.
 
 MAIN USER FLOW
-1. Notebook -> New project: choose a deadline or an ongoing daily goal.
+1. Notebook -> New project: choose a deadline or an ongoing daily goal. New
+   dated goals link daily/total effort using the inclusive number of dates.
 2. Tasks: outline tasks/subtasks during creation or add them later. Select a
    task or subtask to focus. Parent totals include both; records count once.
-3. Focus: start, pause/resume, finish, then confirm actual date/minutes to save.
+3. Focus: start, pause/resume, finish, then adjust actual start/end periods.
+   The combined periods determine the recorded minutes and hourly chart.
 4. Daily plan: see the usual pace and optional extra. Extra is bounded by 25%
    of the usual pace, at most 15 minutes and the project's daily maximum.
 5. Records: inspect a saved day's hourly bars and observed music, or add/edit/
@@ -97,9 +99,10 @@ Source mode uses data/ beside app.py. The packaged Mac app uses
 including images. An explicit --data /path/planner.json selects another folder.
 No personal saves or credentials are included in this submission.
 
-Confirmed record minutes/dates and observed timer intervals are distinct.
-Changing confirmed values does not move or stretch the observed timeline.
-Older records without intervals receive no guessed chart hours. Music is
+Confirmed work periods determine record minutes and the chart. Original timer
+observations remain separate, and music is clipped to the confirmed periods
+without being extended or moved. Older records keep their original values
+until periods are explicitly set, and receive no guessed chart hours. Music is
 observed only while connected and focusing; its two-second polling boundaries
 are approximate. Real player Automation permission remains an interactive check.
 Active unsaved sessions cannot be recovered after a crash. Furniture placement,

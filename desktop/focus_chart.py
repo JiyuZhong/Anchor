@@ -1,4 +1,4 @@
-"""Hourly focus bars with a fixed inspection readout."""
+"""Hourly work bars with a fixed inspection readout."""
 
 from datetime import datetime
 import math
@@ -18,6 +18,8 @@ def _scene(widget):
 
 
 def _duration(minutes):
+    if 0 < minutes * 60 < 1:
+        return "<1 sec"
     seconds = max(0, round(minutes * 60))
     if seconds < 60:
         return f"{seconds} sec" if seconds else "0 min"
@@ -39,7 +41,7 @@ class FocusHourChart(QWidget):
         self.hovered_hour = None
         self._highlight_hour = None
         self._highlight_opacity = 0.0
-        self._summary_description = "No observed focus intervals."
+        self._summary_description = "No timed work periods."
         self._fade = QVariantAnimation(self)
         self._fade.setDuration(100)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -47,7 +49,7 @@ class FocusHourChart(QWidget):
         self.setMinimumHeight(112)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName("Observed focus minutes by local hour")
+        self.setAccessibleName("Work time by local hour")
 
     def set_minutes(self, minutes, periods=None):
         self.minutes = list(minutes)
@@ -58,7 +60,7 @@ class FocusHourChart(QWidget):
             raise ValueError("The daily chart needs twenty-four interval lists.")
         self._summary_description = ", ".join(
             f"{hour:02d}:00 {value:.1f} minutes" for hour, value in enumerate(self.minutes) if value
-        ) or "No observed focus intervals."
+        ) or "No timed work periods."
         self._clear_hover(immediate=True)
         self.update()
 
@@ -72,14 +74,14 @@ class FocusHourChart(QWidget):
         """Return the hour, duration and intervals, including DST offsets."""
         hour = self.hovered_hour
         if hour is None:
-            return "Focus by hour", "min", "Local time"
+            return "Work by hour", "min", "Saved periods · local time"
         title = f"{hour:02d}:00 – {hour+1:02d}:00"
         value = _duration(self.minutes[hour])
         if self.minutes[hour] <= 0:
-            return title, value, "No focus recorded"
+            return title, value, "No work period recorded"
         intervals = self.periods[hour]
         if not intervals:
-            return title, value, "Observed focus"
+            return title, value, "Recorded work"
         stamps = [(datetime.fromisoformat(item["started_at"]), datetime.fromisoformat(item["ended_at"]))
                   for item in intervals[:2]]
         offsets = {stamp.utcoffset() for pair in stamps for stamp in pair}
@@ -90,7 +92,9 @@ class FocusHourChart(QWidget):
             if len(offsets) > 1:
                 pattern += " %z"
             ranges.append(f"{start.strftime(pattern)}–{end.strftime(pattern)}")
-        detail = "  ·  ".join(ranges)
+        sources = {item.get("timing_source", "observed") for item in intervals}
+        source = "User-confirmed" if sources == {"confirmed"} else "Earlier timer" if sources == {"observed"} else "Confirmed + timer"
+        detail = source + " · " + "  ·  ".join(ranges)
         if len(intervals) > 2:
             detail += f"  +{len(intervals)-2} more"
         return title, value, detail

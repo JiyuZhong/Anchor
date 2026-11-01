@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QTime, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QSizePolicy, QTabWidget, QTextEdit, QTreeWidget,
+    QAbstractSpinBox, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTabWidget, QTextEdit, QTimeEdit, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from planner.models import TaskNode
+from planner.activity import validate_work_intervals, work_interval_minutes
+from planner.statistics import local_timezone
 
 from .input_controls import DateInput, DurationInput
 
@@ -193,6 +195,9 @@ class ProjectDialog(_InputDialog):
             parent,
         )
         self.project = project
+        self._effort_driver = "daily"
+        self._syncing_effort = False
+        self._effort_link_error = None
         self.setMinimumWidth(560)
         self.resize(620, 590)
         self.task_editor = None
@@ -273,6 +278,10 @@ class ProjectDialog(_InputDialog):
         self.form.addRow("Timing", timing)
         self.form.addRow("Original effort", self.planned_minutes)
         self.form.addRow("Daily goal", self.daily_minutes)
+        self.effort_link_label = QLabel()
+        self.effort_link_label.setObjectName("muted")
+        self.effort_link_label.setWordWrap(True)
+        self.form.addRow("", self.effort_link_label)
         self.form.addRow("Daily maximum", self.daily_limit_minutes)
         self.form.addRow("Book / connection", details)
         self.form.addRow("Your reason", self.motivation_edit)
@@ -297,6 +306,12 @@ class ProjectDialog(_InputDialog):
             self.tabs.currentChanged.connect(self._set_default_action)
             self._set_default_action(0)
         self.daily_minutes.valueChanged.connect(self._keep_cap_above_daily_goal)
+        for name, field in (("daily", self.daily_minutes), ("total", self.planned_minutes)):
+            field.valueChanged.connect(lambda amount, source=name: self._effort_changed(source))
+            field.editor.textEdited.connect(lambda text, source=name: self._effort_changed(source))
+            for preset in field.preset_buttons.values():
+                preset.clicked.connect(lambda checked=False, source=name: self._effort_changed(source))
+        self.deadline_edit.dateChanged.connect(self._sync_effort)
         self.no_deadline_check.toggled.connect(self._update_deadline_mode)
         self._update_deadline_mode()
         self.title_edit.setFocus()
@@ -315,6 +330,59 @@ class ProjectDialog(_InputDialog):
             # Let Save report invalid input instead of replacing an unfinished edit.
             return
 
+    def _effort_changed(self, source):
+        if self._syncing_effort or self.project is not None:
+            return
+        field = self.daily_minutes if source == "daily" else self.planned_minutes
+        try:
+            field.value()
+        except ValueError:
+            self.effort_link_label.setText("Finish entering a valid duration to update the linked estimate.")
+            return
+        self._effort_driver = source
+        self._sync_effort(from_edit=True)
+
+    def _sync_effort(self, *args, from_edit=False):
+        if self._syncing_effort:
+            return
+        self._effort_link_error = None
+        if self.project is not None:
+            self.form.setRowVisible(self.effort_link_label, False)
+            return
+        self.effort_link_label.setVisible(True)
+        if self.no_deadline_check.isChecked():
+            self.effort_link_label.setText("An ongoing goal follows your daily pace, without a total-effort target.")
+            return
+        days = (self.deadline_edit.date().toPython() - date.today()).days + 1
+        if days < 1:
+            self.effort_link_label.setText("Choose today or a later deadline to calculate your pace.")
+            return
+        source = self.daily_minutes if self._effort_driver == "daily" else self.planned_minutes
+        target = self.planned_minutes if self._effort_driver == "daily" else self.daily_minutes
+        try:
+            amount = source.value()
+            if not from_edit:
+                target.value()  # Do not replace an unfinished edit when dates change.
+        except ValueError:
+            self.effort_link_label.setText("Finish entering a valid duration to update the linked estimate.")
+            return
+        derived = amount * days if self._effort_driver == "daily" else (amount + days - 1) // days
+        if derived > target.maximum():
+            self._effort_link_error = "This date range exceeds the supported total effort. Reduce the daily goal or choose an earlier deadline."
+            self.effort_link_label.setText(self._effort_link_error)
+            return
+        self._syncing_effort = True
+        try:
+            target.setValue(derived)
+        finally:
+            self._syncing_effort = False
+        day_word = "day" if days == 1 else "days"
+        if self._effort_driver == "daily":
+            explanation = f"{days} {day_word}, including today and the deadline. Total = daily goal × days."
+        else:
+            explanation = f"{days} {day_word}, including today and the deadline. Daily goal = total ÷ days, rounded up to a whole minute."
+        self.effort_link_label.setText(explanation)
+
     def _update_deadline_mode(self, *args):
         ongoing = self.no_deadline_check.isChecked()
         self.deadline_edit.setVisible(not ongoing)
@@ -322,6 +390,7 @@ class ProjectDialog(_InputDialog):
         if hasattr(self, "fixed_hint"):
             self.fixed_hint.setVisible(not ongoing)
         self.no_deadline_check.setToolTip("An ongoing goal uses your daily target, without a finish date or a total-effort limit.")
+        self._sync_effort()
 
     def payload(self) -> dict:
         values = {
@@ -359,6 +428,13 @@ class ProjectDialog(_InputDialog):
                 fields = (self.planned_minutes, *fields)
             for field in fields:
                 field.interpretText()
+            self._sync_effort()
+            if self._effort_link_error:
+                self._show_error(self._effort_link_error)
+                if self.task_editor is not None:
+                    self.tabs.setCurrentIndex(0)
+                self.daily_minutes.setFocus()
+                return
             values = self.payload()
         except ValueError as exc:
             self._show_error(str(exc))
@@ -384,32 +460,184 @@ class ProjectDialog(_InputDialog):
         super().accept()
 
 
+class _PeriodEndpoint(QWidget):
+    changed = Signal()
+
+    def __init__(self, stamp, minimum, parent=None):
+        super().__init__(parent)
+        self.zone = local_timezone()
+        self.original = stamp.astimezone(self.zone)
+        self.date_input = _date_input(self.original.date(), minimum)
+        self.date_input.setMaximumDate(_qdate(date.today()))
+        self.date_input.button.setAccessibleName('Choose period date')
+        self.time_input = QTimeEdit(QTime(self.original.hour, self.original.minute, self.original.second))
+        self.time_input.setDisplayFormat('HH:mm:ss')
+        self.time_input.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.time_input.setFixedWidth(104)
+        self.time_input.setAccessibleName('Time in hours, minutes and seconds')
+        self.time_input.setToolTip('Local time · hours:minutes:seconds')
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        layout.addWidget(self.date_input, 1)
+        layout.addWidget(self.time_input)
+        self.date_input.dateChanged.connect(lambda value: self.changed.emit())
+        self.time_input.timeChanged.connect(lambda value: self.changed.emit())
+
+    def value(self):
+        day = self.date_input.date().toPython()
+        clock = self.time_input.time().toPython()
+        if day == self.original.date() and clock == self.original.time().replace(tzinfo=None, microsecond=0):
+            return self.original  # Preserve captured fractions and repeated-hour offsets.
+        stamp = datetime.combine(day, clock, tzinfo=self.zone)
+        if stamp.astimezone(timezone.utc).astimezone(self.zone).replace(tzinfo=None) != stamp.replace(tzinfo=None):
+            raise ValueError('This local time does not exist because the clocks change. Choose another time.')
+        return stamp
+
+
+class WorkPeriodEditor(QWidget):
+    """Edit real start/end points; duration is calculated from these periods."""
+
+    changed = Signal()
+
+    def __init__(self, intervals, minimum, parent=None):
+        super().__init__(parent)
+        self.minimum = minimum
+        self.rows = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        headings = QHBoxLayout()
+        headings.addWidget(QLabel('Start'), 1)
+        headings.addWidget(QLabel('End'), 1)
+        headings.addSpacing(36)
+        layout.addLayout(headings)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.content = QWidget()
+        self.period_layout = QVBoxLayout(self.content)
+        self.period_layout.setContentsMargins(0, 0, 0, 0)
+        self.period_layout.setSpacing(6)
+        self.scroll.setWidget(self.content)
+        layout.addWidget(self.scroll)
+        self.add_button = QPushButton('+ Add period')
+        self.add_button.setObjectName('ghost')
+        self.add_button.setAutoDefault(False)
+        self.add_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_button.clicked.connect(lambda: self.add_period())
+        layout.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
+        for span in intervals:
+            self.add_period(datetime.fromisoformat(span['started_at'].replace('Z', '+00:00')),
+                            datetime.fromisoformat(span['ended_at'].replace('Z', '+00:00')))
+
+    def add_period(self, start=None, end=None):
+        if start is None:
+            try:
+                start = self.rows[-1][2].value() if self.rows else datetime.now().astimezone()
+            except ValueError:
+                self.changed.emit()
+                return
+            end = start
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        beginning = _PeriodEndpoint(start, self.minimum)
+        ending = _PeriodEndpoint(end, self.minimum)
+        remove = QPushButton('×')
+        remove.setObjectName('ghost')
+        remove.setFixedWidth(30)
+        remove.setStyleSheet('padding: 6px 0;')
+        remove.setAutoDefault(False)
+        remove.setAccessibleName('Remove this period')
+        remove.setCursor(Qt.CursorShape.PointingHandCursor)
+        row.addWidget(beginning, 1)
+        row.addWidget(ending, 1)
+        row.addWidget(remove)
+        entry = (widget, beginning, ending, remove)
+        self.rows.append(entry)
+        self.period_layout.addWidget(widget)
+        beginning.changed.connect(self.changed)
+        ending.changed.connect(self.changed)
+        remove.clicked.connect(lambda: self.remove_period(entry))
+        self._fit_rows()
+        self.changed.emit()
+
+    def remove_period(self, entry):
+        self.rows.remove(entry)
+        self.period_layout.removeWidget(entry[0])
+        entry[0].deleteLater()
+        self._fit_rows()
+        self.changed.emit()
+
+    def _fit_rows(self):
+        self.scroll.setFixedHeight(min(3, max(1, len(self.rows))) * 48 + 4)
+        for entry in self.rows:
+            entry[3].setEnabled(len(self.rows) > 1)
+
+    def intervals(self):
+        intervals = []
+        for _, beginning, ending, _ in self.rows:
+            start, end = beginning.value(), ending.value()
+            seconds = (end.astimezone(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()
+            intervals.append({'started_at': start.isoformat(), 'ended_at': end.isoformat(), 'seconds': seconds})
+        intervals.sort(key=lambda span: datetime.fromisoformat(span['started_at']).astimezone(timezone.utc))
+        validate_work_intervals(intervals)
+        return intervals
+
+
 class WorkLogDialog(_InputDialog):
-    """Enter or correct a work record."""
+    """Confirm work periods, with a duration-only fallback for old records."""
 
     def __init__(self, project, log=None, initial_minutes=None, initial_date=None,
-                 initial_task_id=None, parent=None):
+                 initial_task_id=None, parent=None, *, initial_intervals=None):
         super().__init__(
-            "Edit time record" if log else "Record time",
-            "Choose the day and minutes you actually worked.",
+            'Edit time record' if log else 'Record time',
+            'Adjust the start and end times. The duration and hourly chart follow these periods.',
             parent,
         )
-        self.project = project
-        self.log = log
-        self.date_edit = _date_input(
-            log.worked_on if log else (initial_date or date.today()), project.start_date
-        )
+        self.setMinimumWidth(680)
+        self.resize(700, 570)
+        self.form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        self.project, self.log = project, log
+        self.date_edit = _date_input(log.worked_on if log else (initial_date or date.today()), project.start_date)
         self.date_edit.setMaximumDate(_qdate(date.today()))
-        self.minutes_edit = _minutes(log.minutes if log else (initial_minutes or 25))
+        confirmed = getattr(log, 'work_intervals', None) if log else initial_intervals
+        self.legacy = log is not None and confirmed is None
+        spans = confirmed
+        if spans is None and log and log.focus_details:
+            spans = log.focus_details['segments']
+        if not spans:
+            end = datetime.now().astimezone()
+            if initial_date and initial_date != end.date():
+                end = datetime.combine(initial_date, end.timetz())
+            minimum = datetime.combine(project.start_date, datetime.min.time(), tzinfo=local_timezone())
+            start = end if self.legacy or initial_intervals is not None else max(minimum, end - timedelta(minutes=initial_minutes or 25))
+            spans = [{'started_at': start.isoformat(), 'ended_at': end.isoformat(),
+                      'seconds': (end-start).total_seconds()}]
+        self.period_editor = WorkPeriodEditor(spans, project.start_date)
+        self.periods_check = QCheckBox('Set or correct the time periods')
+        self.periods_check.setChecked(not self.legacy)
+        self.periods_check.setVisible(self.legacy)
+        self.duration_label = QLabel()
+        self.duration_label.setObjectName('section')
+        self.duration_hint = QLabel()
+        self.duration_hint.setObjectName('muted')
+        self.duration_hint.setWordWrap(True)
         self.task_combo = QComboBox()
-        self.task_combo.addItem("The whole project", None)
+        self.task_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.task_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.task_combo.setMinimumContentsLength(12)
+        self.task_combo.addItem('The whole project', None)
 
         def add_tasks(tasks, path=()):
             for task in tasks:
                 names = (*path, task.title)
-                self.task_combo.addItem(" / ".join(names), task.id)
+                self.task_combo.addItem(' / '.join(names), task.id)
                 add_tasks(task.children, names)
-
         add_tasks(project.tasks)
         selected = log.task_id if log else initial_task_id
         if selected:
@@ -419,49 +647,76 @@ class WorkLogDialog(_InputDialog):
         self.task_combo.setEnabled(log is None)
         self.note_edit = QTextEdit()
         self.note_edit.setAcceptRichText(False)
-        self.note_edit.setPlainText(log.note if log else "")
-        self.note_edit.setPlaceholderText("What did you work on? (optional)")
-        self.note_edit.setFixedHeight(100)
+        self.note_edit.setPlainText(log.note if log else '')
+        self.note_edit.setPlaceholderText('What did you work on? (optional)')
+        self.note_edit.setFixedHeight(76)
         project_label = QLabel(project.title)
         project_label.setTextFormat(Qt.TextFormat.PlainText)
         project_label.setWordWrap(True)
-        self.form.addRow("Project", project_label)
-        self.form.addRow("Actual work date", self.date_edit)
-        self.form.addRow("Time spent", self.minutes_edit)
-        self.form.addRow("Task", self.task_combo)
-        task_hint = QLabel("Task time includes its subtasks. Each record counts once towards the project.")
-        task_hint.setObjectName("muted")
-        task_hint.setWordWrap(True)
-        self.form.addRow("", task_hint)
-        self.form.addRow("Note", self.note_edit)
-        self._add_buttons("Save changes" if log else "Save time record")
+        self.form.addRow('Project', project_label)
+        self.form.addRow('Work date', self.date_edit)
+        self.form.addRow('Task', self.task_combo)
+        self.form.addRow(self.periods_check)
+        self.form.addRow(self.period_editor)
+        self.form.addRow('Recorded', self.duration_label)
+        self.form.addRow(self.duration_hint)
+        self.form.addRow('Note', self.note_edit)
+        self._add_buttons('Save changes' if log else 'Save time record')
+        self.period_editor.changed.connect(self._update_duration)
+        self.periods_check.toggled.connect(self._update_duration)
+        self._update_duration()
         if project.start_date > date.today():
-            self._show_error("This project has not started yet. Work can be recorded from its start date.")
+            self._show_error('This project has not started yet. Record work from its start date.')
             self.save_button.setEnabled(False)
 
-    def payload(self) -> dict:
-        values = {
-            "worked_on": self.date_edit.date().toPython(),
-            "minutes": self.minutes_edit.value(),
-            "note": self.note_edit.toPlainText().strip(),
-        }
+    def _update_duration(self, *args):
+        use_periods = self.periods_check.isChecked()
+        self.period_editor.setVisible(use_periods)
+        self.form.setRowVisible(self.date_edit, not use_periods)
+        visible_rows = min(3, max(1, len(self.period_editor.rows))) if use_periods else 1
+        self.setMinimumHeight(570 + (visible_rows - 1) * 48)
+        if not use_periods:
+            self.duration_label.setText(f'{self.log.minutes} min · existing record')
+            self.duration_hint.setText('This older record has no confirmed periods. Keep its minutes, or enable periods above to correct the actual start and end times.')
+            return
+        try:
+            spans = self.period_editor.intervals()
+            minutes = work_interval_minutes(spans)
+            seconds = sum(span['seconds'] for span in spans)
+            self.duration_label.setText(f'{minutes} min')
+            previous = f'Previously recorded: {self.log.minutes} min. ' if self.legacy else ''
+            exact = (f'{seconds:.3f}s' if seconds < 1 else f'{seconds:.1f}s') if seconds < 60 else f'{seconds / 60:.2f} minutes'
+            if seconds < .001:
+                exact = '<0.001s'
+            periods = 'period' if len(spans) == 1 else 'periods'
+            self.duration_hint.setText(previous + f'{len(spans)} {periods} · {exact} of work. Partial minutes round up once per record; pauses between periods are excluded.')
+        except ValueError as exc:
+            self.duration_label.setText('Choose valid periods')
+            self.duration_hint.setText(str(exc))
+
+    def payload(self):
+        values = {'note': self.note_edit.toPlainText().strip()}
+        if self.periods_check.isChecked():
+            spans = self.period_editor.intervals()
+            values.update(work_intervals=spans, minutes=work_interval_minutes(spans),
+                          worked_on=datetime.fromisoformat(spans[0]['started_at']).date())
+        else:
+            values.update(worked_on=self.date_edit.date().toPython(), minutes=self.log.minutes)
         if self.log is None:
-            values["task_id"] = self.task_combo.currentData()
+            values['task_id'] = self.task_combo.currentData()
         return values
 
     def accept(self):
         try:
-            self.minutes_edit.interpretText()
             values = self.payload()
+            if not self.project.start_date <= values['worked_on'] <= date.today():
+                raise ValueError('Choose a date between the project start and today.')
+            now = datetime.now(timezone.utc)
+            if any(datetime.fromisoformat(span['ended_at']).astimezone(timezone.utc) > now
+                   for span in values.get('work_intervals', [])):
+                raise ValueError('A work period cannot end in the future.')
         except ValueError as exc:
             self._show_error(str(exc))
-            self.minutes_edit.setFocus()
-            return
-        if not self.project.start_date <= values["worked_on"] <= date.today():
-            self._show_error("Choose a date between the project start and today.")
-            return
-        if values["minutes"] <= 0:
-            self._show_error("Record at least one minute of actual work.")
             return
         super().accept()
 

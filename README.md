@@ -6,7 +6,7 @@ A Python desktop study room for planning projects, recording focused work and ke
 
 ## Install
 
-Download from [Anchor 1.1.1](https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.1).
+Download from [Anchor 1.1.2](https://github.com/JiyuZhong/Anchor/releases/tag/v1.1.2).
 
 | Download | Use |
 | --- | --- |
@@ -29,9 +29,10 @@ On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. On macOS, `Launch Anc
 
 - Create dated projects or ongoing daily goals, outlining tasks and subtasks before saving.
 - Focus on a task directly or choose a subtask. Task totals include both, and each session counts once towards the project. Adding a new subtask reopens a completed task and preserves its records.
-- Start, pause and save focus sessions, or backfill work and undo the latest record change.
+- Link daily and total effort to the dates of a new goal; the last edited value drives the estimate.
+- Start, pause and save focus sessions. Edit actual start/end periods to update duration, daily totals and hourly bars together; gaps remain excluded. Backfill work or undo the latest record change.
 - Enable optional catch-up: extra time is capped at 15 minutes, 25% of the daily goal and spare daily capacity. Ongoing goals consider only yesterday's shortfall.
-- Review saved focus intervals and observed music in hourly statistics. Confirmed work minutes remain separate from observed timing.
+- Review confirmed work periods and observed music in hourly statistics. Original timer observations are retained, and editing a period never invents listening history.
 - Customise book covers, spines and shelf positions. Archive finished or unfinished projects and reopen them with their history.
 - Use day/night views, personal notes and UI-free immersion. Spotify and Apple Music controls are optional and macOS only.
 

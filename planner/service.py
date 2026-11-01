@@ -4,8 +4,13 @@ from copy import deepcopy
 from datetime import date, datetime, timezone
 
 from .models import Project, TaskNode, WorkLog, validate_project
+from .activity import validate_work_intervals, work_interval_minutes
 from .planning import suggest_schedule, task_minutes, time_bar
+from .statistics import local_timezone, recorded_minutes_on
 from .storage import JsonRepository
+
+
+_UNCHANGED = object()
 
 
 class PlannerService:
@@ -156,14 +161,34 @@ class PlannerService:
         task.completed = completed
         self._commit(project)
 
-    def add_work(self, project_id: str, worked_on: date, minutes: int,
+    def _work_minutes(self, minutes, intervals):
+        if intervals is None:
+            if minutes is None:
+                raise ValueError("Choose work periods or provide recorded minutes.")
+            return minutes
+        parsed = validate_work_intervals(intervals)
+        local = local_timezone()
+        today = self.today()
+        now = datetime.now(timezone.utc) if today == date.today() else None
+        for _, end, _ in parsed:
+            if end.astimezone(local).date() > today or (now is not None and end > now):
+                raise ValueError("Work periods cannot end in the future.")
+        derived = work_interval_minutes(intervals)
+        if minutes is not None and (type(minutes) is not int or minutes != derived):
+            raise ValueError("Recorded minutes are calculated from the work periods.")
+        return derived
+
+    def add_work(self, project_id: str, worked_on: date, minutes: int | None = None,
                  task_id: str | None = None, note: str = "", *, source: str = "manual",
-                 focus_details: dict | None = None) -> WorkLog:
+                 focus_details: dict | None = None,
+                 work_intervals: list[dict] | None = None) -> WorkLog:
         project = self._editable(project_id)
         if worked_on > self.today():
             raise ValueError("Actual work cannot be recorded in the future.")
+        minutes = self._work_minutes(minutes, work_intervals)
         log = WorkLog(worked_on, minutes, datetime.now(timezone.utc).isoformat(), task_id, note,
-                      source=source, focus_details=deepcopy(focus_details))
+                      source=source, focus_details=deepcopy(focus_details),
+                      work_intervals=deepcopy(work_intervals))
         project.logs.append(log)
         change = {"project_id": project_id, "before": None, "after": log.to_dict(),
                   "index": len(project.logs) - 1}
@@ -171,14 +196,21 @@ class PlannerService:
         return deepcopy(log)
 
     def edit_work(self, project_id: str, log_id: str, worked_on: date,
-                  minutes: int, note: str) -> None:
+                  minutes: int | None = None, note: str = "", *,
+                  work_intervals=_UNCHANGED) -> None:
         project = self._editable(project_id)
         if worked_on > self.today():
             raise ValueError("Actual work cannot be recorded in the future.")
         index = self._log_index(project, log_id)
         before = project.logs[index].to_dict()
         log = project.logs[index]
+        if work_intervals is _UNCHANGED:
+            work_intervals = log.work_intervals
+            if work_intervals is None and minutes is None:
+                minutes = log.minutes
+        minutes = self._work_minutes(minutes, work_intervals)
         log.worked_on, log.minutes, log.note = worked_on, minutes, note
+        log.work_intervals = deepcopy(work_intervals)
         change = {"project_id": project_id, "before": before, "after": log.to_dict(), "index": index}
         self._commit(project, change, keep_undo=False)
 
@@ -240,8 +272,9 @@ class PlannerService:
         """Sum confirmed focus-session minutes for a date, including archived work."""
         if type(worked_on) is not date:
             raise ValueError("The focus total requires an actual date.")
-        return sum(log.minutes for project in self._projects.values() for log in project.logs
-                   if log.worked_on == worked_on and log.source == "focus")
+        tz = local_timezone()
+        return sum(recorded_minutes_on(log, worked_on, tz) for project in self._projects.values()
+                   for log in project.logs if log.source == "focus")
 
     def effort_for_task(self, project_id: str, task_id: str) -> int:
         project = self.get_project(project_id)
